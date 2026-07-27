@@ -20,7 +20,7 @@ Start a new Codex task after installation.
 Configure the ReceiptDrop user UUID once:
 
 ```text
-Config ReceiptDrop UUID：<your-uuid>
+Configure my ReceiptDrop user UUID: <your-uuid>
 ```
 
 The UUID is stored only on the current computer at:
@@ -32,7 +32,7 @@ The UUID is stored only on the current computer at:
 Then ask Codex to search:
 
 ```text
-search 2026.7 receipts;
+Find my receipts from July 1, 2026.
 ```
 
 ## Included tools
