@@ -1,0 +1,20 @@
+{
+  "name": "receiptdrop",
+  "interface": {
+    "displayName": "ReceiptDrop"
+  },
+  "plugins": [
+    {
+      "name": "receiptdrop",
+      "source": {
+        "source": "local",
+        "path": "./plugins/receiptdrop"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
