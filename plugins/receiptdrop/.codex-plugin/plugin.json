@@ -1,10 +1,11 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260727163837",
+  "version": "0.1.1+codex.20260727170824",
   "description": "Search ReceiptDrop receipts and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
   },
+  "homepage": "https://receiptdrop.dev",
   "keywords": [
     "receipts",
     "expenses",
@@ -22,11 +23,14 @@
       "Generate",
       "Download"
     ],
+    "websiteURL": "https://receiptdrop.dev",
     "defaultPrompt": [
       "\u914d\u7f6e\u6211\u7684 ReceiptDrop \u7528\u6237 UUID\u3002",
       "\u67e5\u627e\u6211\u8fd9\u4e2a\u6708\u7684 ReceiptDrop \u7968\u636e\u3002",
       "\u5217\u51fa\u6700\u8fd1\u7684\u7968\u636e\uff0c\u8ba9\u6211\u9009\u62e9\u54ea\u4e9b\u8981\u62a5\u9500\u3002"
     ],
-    "brandColor": "#2563EB"
+    "brandColor": "#FFE500",
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png"
   }
 }
