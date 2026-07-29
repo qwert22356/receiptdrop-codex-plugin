@@ -1,7 +1,7 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260729091315",
-  "description": "Search and update ReceiptDrop receipts, and generate reimbursement packages from Codex.",
+  "version": "0.1.1+codex.20260729112015",
+  "description": "Upload, search, view, and update ReceiptDrop receipts, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
   },
@@ -14,12 +14,16 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "ReceiptDrop",
-    "shortDescription": "Find receipts and prepare reimbursement files.",
-    "longDescription": "Connect Codex to your ReceiptDrop account to search receipts, confirm which expenses to reimburse, run Generate, and download the resulting files for browser upload.",
+    "shortDescription": "Upload, find, view, and manage receipts.",
+    "longDescription": "Connect Codex to your ReceiptDrop account to upload receipt files, search and view attachments, update receipt details, confirm expenses, run Generate, and download reimbursement packages.",
     "developerName": "ReceiptDrop",
     "category": "Productivity",
     "capabilities": [
       "Search",
+      "Upload",
+      "View",
+      "Recent uploads",
+      "Account and AI Voice quota",
       "Update",
       "Generate",
       "Download"
@@ -27,6 +31,9 @@
     "websiteURL": "https://receiptdrop.dev",
     "defaultPrompt": [
       "Configure my ReceiptDrop user UUID.",
+      "Upload these receipt files to ReceiptDrop.",
+      "Show my ReceiptDrop receipts uploaded today.",
+      "Check my ReceiptDrop account and remaining receipt quota.",
       "Find my ReceiptDrop receipts from this month.",
       "List my recent receipts so I can choose which ones to reimburse."
     ],
