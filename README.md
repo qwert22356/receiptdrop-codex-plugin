@@ -1,8 +1,8 @@
 # ReceiptDrop for Codex
 
-ReceiptDrop's Codex plugin searches receipts, lets the user confirm which
-expenses to reimburse, runs ReceiptDrop Generate, and downloads the generated
-package for browser upload.
+ReceiptDrop's Codex plugin uploads, searches, views, and updates receipts, lets
+the user confirm which expenses to reimburse, runs ReceiptDrop Generate, and
+downloads the generated package.
 
 ## Install
 
@@ -39,6 +39,11 @@ Find my receipts from July 1, 2026.
 
 - `configure_receiptdrop_user`
 - `search_receipts`
+- `get_recent_uploads`
+- `get_account_quota`
+- `get_receipt_attachment`
+- `upload_receipts`
+- `update_receipt`
 - `generate_expense_package`
 
 Generated packages are downloaded under:

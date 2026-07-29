@@ -13,7 +13,11 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
 var __commonJS = (cb, mod) => function __require2() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -9312,7 +9316,6 @@ function $constructor(name, initializer3, params) {
   Object.defineProperty(_, "name", { value: name });
   return _;
 }
-var $brand = Symbol("zod_brand");
 var $ZodAsyncError = class extends Error {
   constructor() {
     super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
@@ -11816,8 +11819,6 @@ function en_default() {
 }
 
 // node_modules/zod/v4/core/registries.js
-var $output = Symbol("ZodOutput");
-var $input = Symbol("ZodInput");
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new Map();
@@ -15389,7 +15390,7 @@ var StdioServerTransport = class {
 // src/client.ts
 var import_extract_zip = __toESM(require_extract_zip(), 1);
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -15402,6 +15403,20 @@ function safeSegment(value) {
   const normalized = value.normalize("NFKC").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 80);
   return normalized || "expense-package";
 }
+var MIME_TYPES = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
+  ".bmp": "image/bmp"
+};
+var MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 function collectUrls(value, output = []) {
   if (typeof value === "string" && /^https?:\/\//i.test(value)) {
     output.push(value);
@@ -15439,6 +15454,8 @@ var ReceiptDropClient = class {
     this.fetchImpl = fetchImpl;
     this.userId = config2.userId;
   }
+  config;
+  fetchImpl;
   userId;
   setUserId(userId) {
     this.userId = userId;
@@ -15452,7 +15469,10 @@ var ReceiptDropClient = class {
     return this.userId;
   }
   async requestJson(pathname, body) {
-    const response = await this.fetchImpl(`${this.config.apiBase}${pathname}`, {
+    return this.requestJsonAt(this.config.apiBase, pathname, body);
+  }
+  async requestJsonAt(baseUrl, pathname, body) {
+    const response = await this.fetchImpl(`${baseUrl}${pathname}`, {
       method: "POST",
       headers: {
         accept: "application/json",
@@ -15480,6 +15500,60 @@ var ReceiptDropClient = class {
       );
     }
     return parsed;
+  }
+  async getAccountInfo() {
+    const userId = this.requireUserId();
+    const result = await this.requestJsonAt(
+      this.config.accountApiBase ?? "https://account-management-center.receiptdrop.dev",
+      "/users/account-check",
+      { user_id: userId }
+    );
+    if (!result || typeof result !== "object" || !result.receipt_quota) {
+      throw new Error("ReceiptDrop account query returned an invalid response.");
+    }
+    if (result.user_id !== userId) {
+      throw new Error("ReceiptDrop account response did not match the configured user.");
+    }
+    return result;
+  }
+  async getVoiceUsage() {
+    if (!this.config.apiToken) {
+      throw new Error(
+        "AI Voice quota requires RECEIPTDROP_API_TOKEN to contain the user's Supabase access token."
+      );
+    }
+    const response = await this.fetchImpl(
+      `${this.config.voiceApiBase ?? "https://xhavjxkrhsvezosozwma.supabase.co/functions/v1"}/footprint-assistant`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${this.config.apiToken}`,
+          ...this.config.voiceApiKey ? { apikey: this.config.voiceApiKey } : {}
+        },
+        body: JSON.stringify({ action: "usage" })
+      }
+    );
+    const result = await this.parseResponse(response);
+    if (!result?.quick_note || !result?.journey) {
+      throw new Error("ReceiptDrop AI Voice usage query returned an invalid response.");
+    }
+    return result;
+  }
+  async parseResponse(response) {
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `ReceiptDrop API ${response.status} ${response.statusText}: ${text.slice(0, 500)}`
+      );
+    }
+    if (!text.trim()) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`ReceiptDrop API returned invalid JSON: ${text.slice(0, 200)}`);
+    }
   }
   async searchReceipts(options = {}) {
     const userId = this.requireUserId();
@@ -15529,6 +15603,39 @@ var ReceiptDropClient = class {
       return true;
     });
   }
+  async getRecentUploads(options) {
+    const userId = this.requireUserId();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(options.startDate)) {
+      throw new Error("Recent uploads start date must use YYYY-MM-DD.");
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(options.endDate)) {
+      throw new Error("Recent uploads end date must use YYYY-MM-DD.");
+    }
+    if (options.startDate > options.endDate) {
+      throw new Error("Recent uploads start date cannot be later than end date.");
+    }
+    const limit = Math.min(options.limit ?? 50, 500);
+    const offset = options.offset ?? 0;
+    const result = await this.requestJson(
+      "/receipt-items-en/get-receipt-items-creat",
+      {
+        user_id: userId,
+        ind: 0,
+        start_time: options.startDate,
+        end_time: options.endDate,
+        year: 0,
+        month: 0,
+        limit,
+        offset
+      }
+    );
+    if (!Array.isArray(result)) {
+      throw new Error("ReceiptDrop recent uploads query did not return an array.");
+    }
+    return result.filter((receipt) => receipt.user_id === userId).sort(
+      (left, right) => String(right.create_time ?? "").localeCompare(String(left.create_time ?? ""))
+    ).slice(0, limit);
+  }
   async getReceiptsByIds(receiptIds) {
     const userId = this.requireUserId();
     const uniqueIds = [...new Set(receiptIds)];
@@ -15557,6 +15664,126 @@ var ReceiptDropClient = class {
       throw new Error(`Receipt IDs not found for configured user: ${missing.join(", ")}`);
     }
     return receipts.filter((receipt) => Boolean(receipt));
+  }
+  async getReceiptAttachment(receiptId) {
+    const [receipt] = await this.getReceiptsByIds([receiptId]);
+    const attachmentUrl = receipt.file_url?.trim();
+    if (!attachmentUrl) {
+      throw new Error(`Receipt ${receiptId} does not have an attachment URL.`);
+    }
+    const parsedUrl = new URL(attachmentUrl);
+    if (!["https:", "http:"].includes(parsedUrl.protocol)) {
+      throw new Error(`Receipt ${receiptId} has an unsupported attachment URL.`);
+    }
+    const attachmentDirectory = path.join(
+      this.config.downloadDir,
+      "receipt-attachments",
+      String(receipt.ind)
+    );
+    await mkdir(attachmentDirectory, { recursive: true });
+    const response = await this.fetchImpl(parsedUrl, {
+      headers: this.config.apiToken ? { authorization: `Bearer ${this.config.apiToken}` } : void 0,
+      redirect: "follow",
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Receipt ${receiptId} attachment download failed with HTTP ${response.status}.`
+      );
+    }
+    const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLocaleLowerCase();
+    const extensionByType = {
+      "image/jpeg": ".jpg",
+      "image/png": ".png",
+      "image/gif": ".gif",
+      "image/webp": ".webp",
+      "image/heic": ".heic",
+      "image/heif": ".heif",
+      "image/tiff": ".tiff",
+      "image/bmp": ".bmp",
+      "application/pdf": ".pdf"
+    };
+    const urlFilename = path.basename(parsedUrl.pathname);
+    const urlExtension = path.extname(urlFilename);
+    const extension = extensionByType[contentType] || urlExtension || ".bin";
+    const localPath = path.join(
+      attachmentDirectory,
+      `receipt-${receipt.ind}${extension.toLocaleLowerCase()}`
+    );
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.length) {
+      throw new Error(`Receipt ${receiptId} attachment download was empty.`);
+    }
+    if (bytes.length > 25 * 1024 * 1024) {
+      throw new Error(`Receipt ${receiptId} attachment exceeds the 25 MB view limit.`);
+    }
+    await writeFile(localPath, bytes);
+    const directlyRenderable = (/* @__PURE__ */ new Set([
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp"
+    ])).has(contentType);
+    return {
+      receiptId: receipt.ind,
+      date: receipt.invoice_date,
+      merchant: receipt.seller,
+      buyer: receipt.buyer,
+      amount: receipt.invoice_total,
+      currency: receipt.currency,
+      invoiceNumber: receipt.invoice_number,
+      attachmentUrl,
+      localPath,
+      contentType,
+      size: bytes.length,
+      displayMarkdown: directlyRenderable ? `![Receipt ${receipt.ind}](${localPath})` : `[Open receipt ${receipt.ind}](${localPath})`
+    };
+  }
+  async uploadReceipts(filePaths) {
+    const userId = this.requireUserId();
+    if (!filePaths.length) throw new Error("At least one file path is required.");
+    const form = new FormData();
+    const uploadedFiles = [];
+    for (const filePath of [...new Set(filePaths)]) {
+      if (!path.isAbsolute(filePath)) {
+        throw new Error(`Receipt upload paths must be absolute: ${filePath}`);
+      }
+      const extension = path.extname(filePath).toLocaleLowerCase();
+      const mimeType = MIME_TYPES[extension];
+      if (!mimeType) {
+        throw new Error(
+          `Unsupported receipt file type "${extension || "(none)"}". Use an image or PDF.`
+        );
+      }
+      const info = await stat(filePath);
+      if (!info.isFile()) throw new Error(`Receipt upload path is not a file: ${filePath}`);
+      if (info.size === 0) throw new Error(`Receipt upload file is empty: ${filePath}`);
+      if (info.size > MAX_UPLOAD_BYTES) {
+        throw new Error(`Receipt upload exceeds the 10 MB limit: ${filePath}`);
+      }
+      const filename = path.basename(filePath);
+      const contents = await readFile(filePath);
+      form.append("files", new Blob([contents], { type: mimeType }), filename);
+      uploadedFiles.push({
+        path: filePath,
+        filename,
+        size: info.size,
+        mimeType
+      });
+    }
+    const query = new URLSearchParams({ user_id: userId });
+    const response = await this.fetchImpl(
+      `${this.config.apiBase}/receiptdrop-web-save/receiptdrop-transfer?${query.toString()}`,
+      {
+        method: "POST",
+        headers: this.config.apiToken ? { authorization: `Bearer ${this.config.apiToken}` } : void 0,
+        body: form
+      }
+    );
+    return {
+      uploadedFiles,
+      response: await this.parseResponse(response)
+    };
   }
   async updateReceipt(receiptId, updates) {
     const userId = this.requireUserId();
@@ -15699,16 +15926,33 @@ var ReceiptDropClient = class {
 // src/config.ts
 import path2 from "node:path";
 import os from "node:os";
-import { mkdir as mkdir2, readFile, writeFile } from "node:fs/promises";
+import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "node:fs/promises";
 function loadConfig(env = process.env) {
   const apiBase = (env.RECEIPTDROP_API_BASE ?? "https://receipt-processing-center.receiptdrop.dev").replace(/\/+$/, "");
   const parsedBase = new URL(apiBase);
   if (parsedBase.protocol !== "https:" && parsedBase.hostname !== "localhost") {
     throw new Error("RECEIPTDROP_API_BASE must use HTTPS (localhost is allowed for tests).");
   }
+  const accountApiBase = (env.RECEIPTDROP_ACCOUNT_API_BASE ?? "https://account-management-center.receiptdrop.dev").replace(/\/+$/, "");
+  const parsedAccountBase = new URL(accountApiBase);
+  if (parsedAccountBase.protocol !== "https:" && parsedAccountBase.hostname !== "localhost") {
+    throw new Error(
+      "RECEIPTDROP_ACCOUNT_API_BASE must use HTTPS (localhost is allowed for tests)."
+    );
+  }
+  const voiceApiBase = (env.RECEIPTDROP_VOICE_API_BASE ?? "https://xhavjxkrhsvezosozwma.supabase.co/functions/v1").replace(/\/+$/, "");
+  const parsedVoiceBase = new URL(voiceApiBase);
+  if (parsedVoiceBase.protocol !== "https:" && parsedVoiceBase.hostname !== "localhost") {
+    throw new Error(
+      "RECEIPTDROP_VOICE_API_BASE must use HTTPS (localhost is allowed for tests)."
+    );
+  }
   return {
     userId: env.RECEIPTDROP_USER_ID?.trim() || void 0,
     apiBase,
+    accountApiBase,
+    voiceApiBase,
+    voiceApiKey: env.RECEIPTDROP_VOICE_API_KEY?.trim() || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoYXZqeGtyaHN2ZXpvc296d21hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzNjk4MzksImV4cCI6MjA2Mzk0NTgzOX0.0UBw9O81BNRXTkosKNCZCVcLrZjiUHVj-Rnxoadt0Ec",
     apiToken: env.RECEIPTDROP_API_TOKEN?.trim() || void 0,
     downloadDir: path2.resolve(
       env.RECEIPTDROP_DOWNLOAD_DIR ?? "/private/tmp/receiptdrop-expense"
@@ -15721,7 +15965,7 @@ function loadConfig(env = process.env) {
 async function loadSavedUserId(config2) {
   if (config2.userId) return config2.userId;
   try {
-    const parsed = JSON.parse(await readFile(config2.configFile, "utf8"));
+    const parsed = JSON.parse(await readFile2(config2.configFile, "utf8"));
     return typeof parsed.userId === "string" && parsed.userId.trim() ? parsed.userId.trim() : void 0;
   } catch (error2) {
     const code = error2.code;
@@ -15731,7 +15975,7 @@ async function loadSavedUserId(config2) {
 }
 async function saveUserId(config2, userId) {
   await mkdir2(path2.dirname(config2.configFile), { recursive: true, mode: 448 });
-  await writeFile(
+  await writeFile2(
     config2.configFile,
     `${JSON.stringify({ userId }, null, 2)}
 `,
@@ -19567,7 +19811,7 @@ ZodNaN.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = Symbol("zod_brand");
+var BRAND = /* @__PURE__ */ Symbol("zod_brand");
 var ZodBranded = class extends ZodType2 {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -19976,7 +20220,7 @@ function isTerminal(status) {
 }
 
 // node_modules/zod-to-json-schema/dist/esm/Options.js
-var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
+var ignoreOverride = /* @__PURE__ */ Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
   name: void 0,
   $refStrategy: "root",
@@ -22952,7 +23196,7 @@ var Server = class extends Protocol {
 };
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
-var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
+var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
@@ -23841,7 +24085,7 @@ function createServer(client, config2) {
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the ReceiptDrop plugin or using another appropriate method. Invite users who want to contribute the missing capability to open an issue or submit a pull request at https://github.com/qwert22356/receiptdrop-codex-plugin using their own GitHub account. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the ReceiptDrop plugin or using another appropriate method. Invite users who want to contribute the missing capability to open an issue or submit a pull request at https://github.com/qwert22356/receiptdrop-codex-plugin using their own GitHub account. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
   server.registerTool(
     "configure_receiptdrop_user",
@@ -23871,7 +24115,7 @@ function createServer(client, config2) {
     "search_receipts",
     {
       title: "Search ReceiptDrop receipts",
-      description: "Search receipts belonging to the configured ReceiptDrop user. Returns stable numeric receipt_id values for user confirmation and later Generate calls.",
+      description: "Use this when the user wants to find ReceiptDrop receipts. Returns stable receipt_id values plus attachment URLs that can be opened or displayed.",
       inputSchema: {
         start_date: external_exports.string().optional().describe("Inclusive YYYY-MM-DD date"),
         end_date: external_exports.string().optional().describe("Inclusive YYYY-MM-DD date"),
@@ -23918,10 +24162,173 @@ function createServer(client, config2) {
           currency: receipt.currency,
           invoice_number: receipt.invoice_number,
           address: receipt.address,
-          has_attachment: Boolean(receipt.file_url)
+          has_attachment: Boolean(receipt.file_url),
+          attachment_url: receipt.file_url || null,
+          view_tool_hint: receipt.file_url ? `Call get_receipt_attachment with receipt_id ${receipt.ind}` : null
         }))
       });
     }
+  );
+  server.registerTool(
+    "get_receipt_attachment",
+    {
+      title: "View a ReceiptDrop receipt attachment",
+      description: "Use this when the user asks to view, open, show, or get one receipt found by search_receipts. Downloads the verified attachment once to a local temporary file and returns fast, ready-to-render local Markdown. Do not embed the remote signed URL.",
+      inputSchema: {
+        receipt_id: external_exports.number().int().positive().describe(
+          "Stable receipt_id returned by search_receipts"
+        )
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async ({ receipt_id }) => asText(
+      await client.getReceiptAttachment(receipt_id)
+    )
+  );
+  server.registerTool(
+    "get_recent_uploads",
+    {
+      title: "Get recently uploaded ReceiptDrop receipts",
+      description: "Use this when the user asks for recent uploads, receipts uploaded today, or receipts uploaded during a date range. Filters by ReceiptDrop create_time/upload date, not the AI-recognized invoice_date.",
+      inputSchema: {
+        start_date: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Inclusive upload date in YYYY-MM-DD"),
+        end_date: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Inclusive upload date in YYYY-MM-DD"),
+        limit: external_exports.number().int().min(1).max(500).default(50),
+        offset: external_exports.number().int().nonnegative().default(0)
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (input) => {
+      const receipts = await client.getRecentUploads({
+        startDate: input.start_date,
+        endDate: input.end_date,
+        limit: input.limit,
+        offset: input.offset
+      });
+      return asText({
+        count: receipts.length,
+        upload_date_range: {
+          start_date: input.start_date,
+          end_date: input.end_date
+        },
+        date_semantics: "uploaded_at is the ReceiptDrop create/upload time; invoice_date is AI-recognized from the receipt and may differ or be blank.",
+        receipts: receipts.map((receipt) => ({
+          receipt_id: receipt.ind,
+          uploaded_at: receipt.create_time,
+          invoice_date: receipt.invoice_date || null,
+          merchant: receipt.seller,
+          buyer: receipt.buyer,
+          category: receipt.category,
+          amount: receipt.invoice_total,
+          currency: receipt.currency,
+          invoice_number: receipt.invoice_number,
+          address: receipt.address,
+          has_attachment: Boolean(receipt.file_url),
+          attachment_url: receipt.file_url || null,
+          view_tool_hint: receipt.file_url ? `Call get_receipt_attachment with receipt_id ${receipt.ind}` : null
+        }))
+      });
+    }
+  );
+  server.registerTool(
+    "get_account_quota",
+    {
+      title: "Check ReceiptDrop account, receipt, and AI Voice quotas",
+      description: "Use this when the user asks about their ReceiptDrop account, plan, subscription status, virtual receipt inbox, receipt allowance, AI Voice allowance, usage, remaining quota, or limits. Queries the same account and voice-usage endpoints as v1.8.4.",
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async () => {
+      const [accountResult, voiceResult] = await Promise.allSettled([
+        client.getAccountInfo(),
+        client.getVoiceUsage()
+      ]);
+      if (accountResult.status === "rejected") throw accountResult.reason;
+      const account = accountResult.value;
+      const quota = account.receipt_quota;
+      const rawRemaining = Math.max(0, quota.raw_limit - quota.raw_used);
+      const monthRemaining = Math.max(0, quota.month_limit - quota.month_used);
+      const totalUsed = quota.raw_used + quota.month_used;
+      const totalLimit = quota.raw_limit + quota.month_limit;
+      const voiceAllowance = (allowance) => ({
+        used_count: allowance.used_count,
+        count_limit: allowance.count_limit,
+        remaining_count: Math.max(0, allowance.count_limit - allowance.used_count),
+        used_seconds: allowance.used_seconds,
+        seconds_limit: allowance.seconds_limit,
+        remaining_seconds: Math.max(0, allowance.seconds_limit - allowance.used_seconds),
+        remaining_minutes: Math.ceil(
+          Math.max(0, allowance.seconds_limit - allowance.used_seconds) / 60
+        )
+      });
+      return asText({
+        user_id: account.user_id,
+        subscription_status: account.subscription_status,
+        is_pro: account.subscription_status.toLocaleLowerCase() === "pro",
+        virtual_box: account.virtual_box ?? null,
+        receipt_quota: {
+          bonus: {
+            used: quota.raw_used,
+            limit: quota.raw_limit,
+            remaining: rawRemaining,
+            completed: quota.raw_limit > 0 && quota.raw_used >= quota.raw_limit
+          },
+          monthly: {
+            used: quota.month_used,
+            limit: quota.month_limit,
+            remaining: monthRemaining
+          },
+          total: {
+            used: totalUsed,
+            limit: totalLimit,
+            remaining: rawRemaining + monthRemaining,
+            usage_percentage: totalLimit > 0 ? Math.round(totalUsed / totalLimit * 1e4) / 100 : 0
+          }
+        },
+        ai_voice_quota: voiceResult.status === "fulfilled" ? {
+          plan: voiceResult.value.plan,
+          quick_note: voiceAllowance(voiceResult.value.quick_note),
+          journey: voiceAllowance(voiceResult.value.journey)
+        } : {
+          available: false,
+          reason: voiceResult.reason instanceof Error ? voiceResult.reason.message : String(voiceResult.reason)
+        }
+      });
+    }
+  );
+  server.registerTool(
+    "upload_receipts",
+    {
+      title: "Upload receipts to ReceiptDrop",
+      description: "Use this when the user explicitly asks to upload local receipt or invoice image/PDF files into their configured ReceiptDrop account. Accepts absolute local file paths, with a 10 MB limit per file.",
+      inputSchema: {
+        file_paths: external_exports.array(external_exports.string().min(1)).min(1).max(20).describe("Absolute local paths to image or PDF receipt files")
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async ({ file_paths }) => asText(
+      await client.uploadReceipts(file_paths)
+    )
   );
   server.registerTool(
     "update_receipt",

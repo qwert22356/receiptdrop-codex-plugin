@@ -16,6 +16,10 @@ it locally at:
 ## Included tools
 
 - `search_receipts`
+- `get_receipt_attachment`
+- `get_recent_uploads`
+- `get_account_quota`
+- `upload_receipts`
 - `update_receipt`
 - `generate_expense_package`
 - `configure_receiptdrop_user`
@@ -26,6 +30,23 @@ information, OCR text, hash ID, and creation time. Its `note` convenience
 parameter is prepended to the existing `address` with a ` | ` separator. This
 keeps the original address intact while making the note searchable through
 `search_receipts`.
+
+`search_receipts` returns the receipt attachment URL when present.
+`get_receipt_attachment` verifies a selected receipt, downloads it once to the
+local temporary cache, and returns a fast local Markdown image/link instead of
+hot-linking a long signed storage URL. `upload_receipts` accepts absolute local
+image/PDF paths and uploads them through the v2.3.8 multipart API with a 10 MB
+per-file limit.
+
+`get_recent_uploads` uses the v2.3.8 create-time endpoint, so it filters by the
+date a receipt was uploaded to ReceiptDrop rather than the date recognized from
+the invoice.
+
+`get_account_quota` follows the v1.8.4 account screen and returns the configured
+user's subscription status, virtual receipt inbox, bonus quota, monthly quota,
+remaining/combined receipt allowance, and AI Voice quick-note and journey
+allowances. AI Voice requires the user's Supabase access token in
+`RECEIPTDROP_API_TOKEN`.
 
 Generated packages are downloaded under:
 
