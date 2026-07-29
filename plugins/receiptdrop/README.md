@@ -32,3 +32,11 @@ Generated packages are downloaded under:
 ```text
 /private/tmp/receiptdrop-expense/
 ```
+
+## Capability boundary
+
+When a user asks for an operation that the exposed MCP tools or fields cannot
+perform, the server instructs Codex to identify the unsupported capability,
+summarize the relevant available capabilities, and suggest updating the plugin
+or using another appropriate method. Codex must not claim that an unsupported
+action was completed.

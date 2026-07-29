@@ -23840,6 +23840,8 @@ function createServer(client, config2) {
   const server = new McpServer({
     name: "receiptdrop",
     version: "0.1.0"
+  }, {
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the ReceiptDrop plugin or using another appropriate method. Never claim that an unsupported action was completed."
   });
   server.registerTool(
     "configure_receiptdrop_user",
