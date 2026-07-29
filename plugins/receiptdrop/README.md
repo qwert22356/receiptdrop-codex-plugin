@@ -16,11 +16,27 @@ it locally at:
 ## Included tools
 
 - `search_receipts`
+- `update_receipt`
 - `generate_expense_package`
 - `configure_receiptdrop_user`
+
+`update_receipt` supports the editable v2.3.8 receipt fields: buyer, seller,
+invoice date, category, total, currency, invoice number, address, original
+information, OCR text, hash ID, and creation time. Its `note` convenience
+parameter is prepended to the existing `address` with a ` | ` separator. This
+keeps the original address intact while making the note searchable through
+`search_receipts`.
 
 Generated packages are downloaded under:
 
 ```text
 /private/tmp/receiptdrop-expense/
 ```
+
+## Capability boundary
+
+When a user asks for an operation that the exposed MCP tools or fields cannot
+perform, the server instructs Codex to identify the unsupported capability,
+summarize the relevant available capabilities, and suggest updating the plugin
+or using another appropriate method. Codex must not claim that an unsupported
+action was completed.
