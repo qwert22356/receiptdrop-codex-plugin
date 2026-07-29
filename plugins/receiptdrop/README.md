@@ -40,3 +40,9 @@ perform, the server instructs Codex to identify the unsupported capability,
 summarize the relevant available capabilities, and suggest updating the plugin
 or using another appropriate method. Codex must not claim that an unsupported
 action was completed.
+
+Users who want to contribute a missing capability can open an issue or submit
+a pull request at
+[qwert22356/receiptdrop-codex-plugin](https://github.com/qwert22356/receiptdrop-codex-plugin)
+using their own GitHub account. The plugin must not submit external changes
+without the user's authorization.

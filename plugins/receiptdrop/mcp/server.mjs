@@ -23841,7 +23841,7 @@ function createServer(client, config2) {
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the ReceiptDrop plugin or using another appropriate method. Never claim that an unsupported action was completed."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the ReceiptDrop plugin or using another appropriate method. Invite users who want to contribute the missing capability to open an issue or submit a pull request at https://github.com/qwert22356/receiptdrop-codex-plugin using their own GitHub account. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
   server.registerTool(
     "configure_receiptdrop_user",

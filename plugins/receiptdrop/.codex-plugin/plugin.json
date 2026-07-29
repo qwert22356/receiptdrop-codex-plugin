@@ -1,6 +1,6 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260729091014",
+  "version": "0.1.1+codex.20260729091315",
   "description": "Search and update ReceiptDrop receipts, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
