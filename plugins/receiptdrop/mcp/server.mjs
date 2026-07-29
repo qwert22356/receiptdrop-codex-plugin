@@ -13,11 +13,7 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
 var __commonJS = (cb, mod) => function __require2() {
-  try {
-    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-  } catch (e) {
-    throw mod = 0, e;
-  }
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -9316,6 +9312,7 @@ function $constructor(name, initializer3, params) {
   Object.defineProperty(_, "name", { value: name });
   return _;
 }
+var $brand = Symbol("zod_brand");
 var $ZodAsyncError = class extends Error {
   constructor() {
     super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
@@ -11819,6 +11816,8 @@ function en_default() {
 }
 
 // node_modules/zod/v4/core/registries.js
+var $output = Symbol("ZodOutput");
+var $input = Symbol("ZodInput");
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new Map();
@@ -15440,8 +15439,6 @@ var ReceiptDropClient = class {
     this.fetchImpl = fetchImpl;
     this.userId = config2.userId;
   }
-  config;
-  fetchImpl;
   userId;
   setUserId(userId) {
     this.userId = userId;
@@ -15560,6 +15557,29 @@ var ReceiptDropClient = class {
       throw new Error(`Receipt IDs not found for configured user: ${missing.join(", ")}`);
     }
     return receipts.filter((receipt) => Boolean(receipt));
+  }
+  async updateReceipt(receiptId, updates) {
+    const userId = this.requireUserId();
+    await this.getReceiptsByIds([receiptId]);
+    const entries = Object.entries(updates).filter(
+      ([, value]) => value !== void 0
+    );
+    if (!entries.length) {
+      throw new Error("At least one receipt field must be provided for update.");
+    }
+    const response = await this.requestJson(
+      "/receipt-items-en/update-receipt-items",
+      {
+        ind: receiptId,
+        user_id: userId,
+        ...Object.fromEntries(entries)
+      }
+    );
+    return {
+      receiptId,
+      updatedFields: entries.map(([field]) => field),
+      response
+    };
   }
   async getSummaries(limit = 20) {
     const userId = this.requireUserId();
@@ -19547,7 +19567,7 @@ ZodNaN.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = /* @__PURE__ */ Symbol("zod_brand");
+var BRAND = Symbol("zod_brand");
 var ZodBranded = class extends ZodType2 {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -19956,7 +19976,7 @@ function isTerminal(status) {
 }
 
 // node_modules/zod-to-json-schema/dist/esm/Options.js
-var ignoreOverride = /* @__PURE__ */ Symbol("Let zodToJsonSchema decide on which parser to use");
+var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
   name: void 0,
   $refStrategy: "root",
@@ -22932,7 +22952,7 @@ var Server = class extends Protocol {
 };
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
-var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
+var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
@@ -23898,6 +23918,56 @@ function createServer(client, config2) {
           address: receipt.address,
           has_attachment: Boolean(receipt.file_url)
         }))
+      });
+    }
+  );
+  server.registerTool(
+    "update_receipt",
+    {
+      title: "Update a ReceiptDrop receipt",
+      description: "Update one or more editable fields on a receipt belonging to the configured user. The note convenience field is prepended to the existing address so the note remains searchable without deleting the address.",
+      inputSchema: {
+        receipt_id: external_exports.number().int().positive().describe(
+          "Stable receipt_id returned by search_receipts"
+        ),
+        buyer: external_exports.string().nullable().optional(),
+        seller: external_exports.string().nullable().optional(),
+        invoice_date: external_exports.string().nullable().optional().describe("Invoice date, normally YYYY-MM-DD"),
+        category: external_exports.string().nullable().optional(),
+        invoice_total: external_exports.number().nonnegative().nullable().optional(),
+        currency: external_exports.string().length(3).nullable().optional().describe("Three-letter currency code such as EUR"),
+        invoice_number: external_exports.string().nullable().optional(),
+        address: external_exports.string().nullable().optional(),
+        note: external_exports.string().min(1).optional().describe(
+          "Searchable note or remark; prepended to the existing address with a | separator"
+        ),
+        original_info: external_exports.string().nullable().optional().describe("Original receipt information"),
+        ocr: external_exports.string().nullable().optional(),
+        hash_id: external_exports.string().nullable().optional(),
+        create_time: external_exports.string().nullable().optional()
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async ({ receipt_id, note, ...updates }) => {
+      if (note !== void 0 && updates.address !== void 0) {
+        throw new Error("Provide either note or address, not both.");
+      }
+      if (note !== void 0) {
+        const [receipt] = await client.getReceiptsByIds([receipt_id]);
+        const existingAddress = receipt.address?.trim();
+        updates.address = existingAddress ? `${note.trim()} | ${existingAddress}` : note.trim();
+      }
+      const result = await client.updateReceipt(receipt_id, updates);
+      return asText({
+        updated: true,
+        noteStoredIn: note !== void 0 ? "address" : void 0,
+        noteMode: note !== void 0 ? "prepend" : void 0,
+        ...result
       });
     }
   );
