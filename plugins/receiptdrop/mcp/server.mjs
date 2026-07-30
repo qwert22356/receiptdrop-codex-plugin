@@ -2274,11 +2274,11 @@ var require_extract_zip = __commonJS({
     var { createWriteStream: createWriteStream2, promises: fs } = __require("fs");
     var getStream = require_get_stream();
     var path3 = __require("path");
-    var { promisify } = __require("util");
+    var { promisify: promisify2 } = __require("util");
     var stream = __require("stream");
     var yauzl = require_yauzl();
-    var openZip = promisify(yauzl.open);
-    var pipeline2 = promisify(stream.pipeline);
+    var openZip = promisify2(yauzl.open);
+    var pipeline2 = promisify2(stream.pipeline);
     var Extractor = class {
       constructor(zipPath, opts) {
         this.zipPath = zipPath;
@@ -2360,7 +2360,7 @@ var require_extract_zip = __commonJS({
         await fs.mkdir(destDir, mkdirOptions);
         if (isDir) return;
         debug("opening read stream", dest);
-        const readStream = await promisify(this.zipfile.openReadStream.bind(this.zipfile))(entry);
+        const readStream = await promisify2(this.zipfile.openReadStream.bind(this.zipfile))(entry);
         if (symlink) {
           const link = await getStream(readStream);
           debug("creating symlink", link, dest);
@@ -24178,7 +24178,7 @@ function createServer(client, config2, oauth) {
     "connect_receiptdrop",
     {
       title: "Connect ReceiptDrop account",
-      description: "Start secure ReceiptDrop OAuth login. The tool returns a native resource link named \u8FDE\u63A5 ReceiptDrop \u8D26\u6237; present that link directly and never rewrite its long URI into response text. After approval, ask the user to copy the redirected ReceiptDrop callback URL, then call complete_receiptdrop_connection.",
+      description: "Start secure ReceiptDrop OAuth login by opening the system browser directly. This tool intentionally never returns the long authorization URL. After approval, ask the user to copy the redirected ReceiptDrop callback URL, then call complete_receiptdrop_connection.",
       inputSchema: {},
       annotations: {
         readOnlyHint: false,
@@ -24199,21 +24199,12 @@ function createServer(client, config2, oauth) {
         });
       }
       const result = await oauth.beginAuthorization();
-      return {
-        content: [
-          {
-            type: "resource_link",
-            uri: result.authorization_url,
-            name: "\u8FDE\u63A5 ReceiptDrop \u8D26\u6237",
-            description: "\u5728\u6D4F\u89C8\u5668\u767B\u5F55\u5E76\u5141\u8BB8\u8BBF\u95EE\uFF0C\u7136\u540E\u590D\u5236 ReceiptDrop \u5B8C\u6210\u9875\u9762\u63D0\u4F9B\u7684\u56DE\u8C03 URL\u3002",
-            mimeType: "text/html"
-          },
-          {
-            type: "text",
-            text: "\u8BF7\u6253\u5F00\u4E0A\u65B9\u201C\u8FDE\u63A5 ReceiptDrop \u8D26\u6237\u201D\u94FE\u63A5\u3002\u6388\u6743\u540E\u590D\u5236\u5B8C\u6210\u9875\u9762\u4E0A\u7684\u56DE\u8C03 URL\uFF0C\u5E76\u7C98\u8D34\u56DE Codex\u3002\u4E0D\u8981\u5728\u56DE\u590D\u6B63\u6587\u4E2D\u91CD\u65B0\u8F93\u51FA\u6388\u6743\u94FE\u63A5\u3002"
-          }
-        ]
-      };
+      return asText({
+        authorization_started: true,
+        browser_opened: result.browserOpened,
+        copied_to_clipboard: result.copiedToClipboard,
+        message: result.browserOpened ? "ReceiptDrop authorization opened in the browser. No authorization URL should be printed in the conversation." : "The authorization URL was copied to the clipboard. Paste it into the browser address bar. Do not print the URL in the conversation."
+      });
     }
   );
   server.registerTool(
@@ -24566,6 +24557,8 @@ function createServer(client, config2, oauth) {
 
 // src/oauth.ts
 import { createHash, randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 // src/auth.ts
 async function authenticateSupabaseToken(token, config2, fetchImpl = fetch) {
@@ -24598,6 +24591,7 @@ async function authenticateSupabaseToken(token, config2, fetchImpl = fetch) {
 function base64Url(value) {
   return value.toString("base64url");
 }
+var execFileAsync = promisify(execFile);
 var LocalOAuthManager = class {
   constructor(config2, client, fetchImpl = fetch) {
     this.config = config2;
@@ -24648,7 +24642,25 @@ var LocalOAuthManager = class {
       code_challenge_method: "S256",
       scope: "openid email profile"
     }).toString();
-    return { authorization_url: url.toString() };
+    try {
+      await execFileAsync("/usr/bin/open", [url.toString()], { timeout: 5e3 });
+      return { browserOpened: true, copiedToClipboard: false };
+    } catch {
+      try {
+        await new Promise((resolve, reject) => {
+          const child = execFile("/usr/bin/pbcopy", (error2) => {
+            if (error2) reject(error2);
+            else resolve();
+          });
+          child.stdin?.end(url.toString());
+        });
+        return { browserOpened: false, copiedToClipboard: true };
+      } catch {
+        throw new Error(
+          "ReceiptDrop could not open the browser or copy the authorization link."
+        );
+      }
+    }
   }
   async completeAuthorization(callbackUrl) {
     const callback = new URL(callbackUrl);
