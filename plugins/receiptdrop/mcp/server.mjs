@@ -15634,10 +15634,12 @@ var ReceiptDropClient = class {
         offset
       }
     );
-    if (!Array.isArray(result)) {
+    const wrapped = result && typeof result === "object" ? result : null;
+    const receipts = Array.isArray(result) ? result : wrapped?.status === "success" && Array.isArray(wrapped.data) ? wrapped.data : null;
+    if (!receipts) {
       throw new Error("ReceiptDrop recent uploads query did not return an array.");
     }
-    return result.filter((receipt) => receipt.user_id === userId).sort(
+    return receipts.filter((receipt) => receipt.user_id === userId).sort(
       (left, right) => String(right.create_time ?? right.created_at ?? "").localeCompare(
         String(left.create_time ?? left.created_at ?? "")
       )
