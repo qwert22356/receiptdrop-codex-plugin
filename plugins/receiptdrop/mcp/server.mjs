@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -15952,7 +15953,6 @@ var ReceiptDropClient = class {
 
 // src/config.ts
 import path2 from "node:path";
-import os from "node:os";
 import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "node:fs/promises";
 function loadConfig(env = process.env) {
   const apiBase = (env.RECEIPTDROP_API_BASE ?? "https://receipt-processing-center.receiptdrop.dev").replace(/\/+$/, "");
@@ -15982,7 +15982,7 @@ function loadConfig(env = process.env) {
     voiceApiKey: env.RECEIPTDROP_VOICE_API_KEY?.trim() || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoYXZqeGtyaHN2ZXpvc296d21hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzNjk4MzksImV4cCI6MjA2Mzk0NTgzOX0.0UBw9O81BNRXTkosKNCZCVcLrZjiUHVj-Rnxoadt0Ec",
     apiToken: env.RECEIPTDROP_API_TOKEN?.trim() || void 0,
     oauthClientId: env.RECEIPTDROP_OAUTH_CLIENT_ID?.trim() || "9fc77f06-61ab-4458-b4f8-b1e8f3d3c91c",
-    oauthRedirectUri: env.RECEIPTDROP_OAUTH_REDIRECT_URI?.trim() || "http://127.0.0.1:43821/oauth/callback",
+    oauthRedirectUri: env.RECEIPTDROP_OAUTH_REDIRECT_URI?.trim() || "https://receiptdrop.dev/oauth/codex-local",
     supabaseAuthUrl: (env.RECEIPTDROP_SUPABASE_AUTH_URL ?? "https://xhavjxkrhsvezosozwma.supabase.co/auth/v1").replace(/\/+$/, ""),
     mcpPublicUrl: (env.RECEIPTDROP_MCP_PUBLIC_URL ?? "https://mcp.receiptdrop.dev").replace(/\/+$/, ""),
     httpHost: env.RECEIPTDROP_HTTP_HOST?.trim() || "127.0.0.1",
@@ -15991,7 +15991,7 @@ function loadConfig(env = process.env) {
       env.RECEIPTDROP_DOWNLOAD_DIR ?? "/private/tmp/receiptdrop-expense"
     ),
     configFile: path2.resolve(
-      env.RECEIPTDROP_CONFIG_FILE ?? path2.join(os.homedir(), ".config", "receiptdrop", "config.json")
+      env.RECEIPTDROP_CONFIG_FILE ?? path2.join("/private/tmp", "receiptdrop", "config.json")
     )
   };
 }
@@ -16035,6 +16035,35 @@ async function loadSavedAuthSession(config2) {
 async function saveAuthSession(config2, session) {
   await mkdir2(path2.dirname(config2.configFile), { recursive: true, mode: 448 });
   await writeFile2(config2.configFile, `${JSON.stringify(session, null, 2)}
+`, {
+    encoding: "utf8",
+    mode: 384
+  });
+}
+async function loadPendingOAuth(config2) {
+  try {
+    const parsed = JSON.parse(await readFile2(config2.configFile, "utf8"));
+    const pending = parsed.pendingOAuth;
+    if (typeof pending?.state === "string" && typeof pending.verifier === "string" && typeof pending.createdAt === "number") {
+      return pending;
+    }
+    return void 0;
+  } catch (error2) {
+    if (error2.code === "ENOENT") return void 0;
+    throw error2;
+  }
+}
+async function savePendingOAuth(config2, pendingOAuth) {
+  let parsed = {};
+  try {
+    parsed = JSON.parse(await readFile2(config2.configFile, "utf8"));
+  } catch (error2) {
+    if (error2.code !== "ENOENT") throw error2;
+  }
+  if (pendingOAuth) parsed.pendingOAuth = pendingOAuth;
+  else delete parsed.pendingOAuth;
+  await mkdir2(path2.dirname(config2.configFile), { recursive: true, mode: 448 });
+  await writeFile2(config2.configFile, `${JSON.stringify(parsed, null, 2)}
 `, {
     encoding: "utf8",
     mode: 384
@@ -24149,7 +24178,7 @@ function createServer(client, config2, oauth) {
     "connect_receiptdrop",
     {
       title: "Connect ReceiptDrop account",
-      description: "Start secure ReceiptDrop OAuth login. Present the returned authorization_url as a clickable link. After the user approves access in the browser, their account is connected automatically.",
+      description: "Start secure ReceiptDrop OAuth login. Present authorization_url as a clickable link. After approval, ask the user to copy the redirected ReceiptDrop callback URL, then call complete_receiptdrop_connection.",
       inputSchema: {},
       annotations: {
         readOnlyHint: false,
@@ -24173,7 +24202,33 @@ function createServer(client, config2, oauth) {
       return asText({
         connected: false,
         ...result,
-        message: "Open the authorization URL, sign in to ReceiptDrop, and choose Allow access. Then retry your ReceiptDrop request."
+        message: "Open the authorization URL, sign in, and choose Allow access. On the ReceiptDrop completion page, copy the callback URL and paste it into Codex."
+      });
+    }
+  );
+  server.registerTool(
+    "complete_receiptdrop_connection",
+    {
+      title: "Complete ReceiptDrop account connection",
+      description: "Complete local OAuth using the callback URL copied from ReceiptDrop's authorization completion page.",
+      inputSchema: {
+        callback_url: external_exports.string().url().describe(
+          "Full https://receiptdrop.dev/oauth/codex-local?code=...&state=... URL"
+        )
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async ({ callback_url }) => {
+      if (!oauth) throw new Error("ReceiptDrop OAuth is unavailable.");
+      await oauth.completeAuthorization(callback_url);
+      return asText({
+        connected: true,
+        message: "ReceiptDrop account connected successfully."
       });
     }
   );
@@ -24501,7 +24556,6 @@ function createServer(client, config2, oauth) {
 
 // src/oauth.ts
 import { createHash, randomBytes } from "node:crypto";
-import { createServer as createServer2 } from "node:http";
 
 // src/auth.ts
 async function authenticateSupabaseToken(token, config2, fetchImpl = fetch) {
@@ -24545,9 +24599,6 @@ var LocalOAuthManager = class {
   client;
   fetchImpl;
   session;
-  callbackServer;
-  pendingState;
-  pendingVerifier;
   async initialize() {
     this.session = await loadSavedAuthSession(this.config);
     if (this.session) await this.ensureSession();
@@ -24569,12 +24620,14 @@ var LocalOAuthManager = class {
     if (!clientId || !redirectUri || !authBase) {
       throw new Error("ReceiptDrop local OAuth is not configured.");
     }
-    await this.startCallbackServer(new URL(redirectUri));
     const verifier = base64Url(randomBytes(48));
     const challenge = base64Url(createHash("sha256").update(verifier).digest());
     const state = base64Url(randomBytes(24));
-    this.pendingVerifier = verifier;
-    this.pendingState = state;
+    await savePendingOAuth(this.config, {
+      verifier,
+      state,
+      createdAt: Date.now()
+    });
     const url = new URL(`${authBase}/oauth/authorize`);
     url.search = new URLSearchParams({
       response_type: "code",
@@ -24587,42 +24640,26 @@ var LocalOAuthManager = class {
     }).toString();
     return { authorization_url: url.toString() };
   }
-  async startCallbackServer(callback) {
-    if (this.callbackServer?.listening) return;
-    const port = Number(callback.port);
-    if (callback.protocol !== "http:" || callback.hostname !== "127.0.0.1" || !port) {
-      throw new Error("ReceiptDrop OAuth callback must use a fixed 127.0.0.1 HTTP port.");
+  async completeAuthorization(callbackUrl) {
+    const callback = new URL(callbackUrl);
+    if (`${callback.origin}${callback.pathname}` !== this.config.oauthRedirectUri) {
+      throw new Error("This is not a ReceiptDrop Codex OAuth callback URL.");
     }
-    this.callbackServer = createServer2(async (request, response) => {
-      const requestUrl = new URL(request.url ?? "/", callback.origin);
-      if (requestUrl.pathname !== callback.pathname) {
-        response.writeHead(404).end("Not found");
-        return;
-      }
-      try {
-        const error2 = requestUrl.searchParams.get("error");
-        if (error2) throw new Error(requestUrl.searchParams.get("error_description") ?? error2);
-        const code = requestUrl.searchParams.get("code");
-        const state = requestUrl.searchParams.get("state");
-        if (!code || state !== this.pendingState || !this.pendingVerifier) {
-          throw new Error("Invalid ReceiptDrop OAuth callback.");
-        }
-        await this.exchangeCode(code, this.pendingVerifier);
-        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        response.end("<!doctype html><meta charset=utf-8><title>ReceiptDrop connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;padding:24px}b{background:#ffe500;padding:4px 8px;border-radius:6px}</style><h1>ReceiptDrop connected</h1><p>You can close this tab and return to <b>Codex</b>.</p>");
-      } catch (error2) {
-        response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-        response.end(error2 instanceof Error ? error2.message : String(error2));
-      } finally {
-        this.pendingState = void 0;
-        this.pendingVerifier = void 0;
-        this.callbackServer?.close();
-      }
-    });
-    await new Promise((resolve, reject) => {
-      this.callbackServer.once("error", reject);
-      this.callbackServer.listen(port, "127.0.0.1", resolve);
-    });
+    const error2 = callback.searchParams.get("error");
+    if (error2) {
+      throw new Error(callback.searchParams.get("error_description") ?? error2);
+    }
+    const pending = await loadPendingOAuth(this.config);
+    if (!pending || pending.createdAt < Date.now() - 10 * 6e4) {
+      throw new Error("ReceiptDrop authorization expired. Start the connection again.");
+    }
+    const code = callback.searchParams.get("code");
+    const state = callback.searchParams.get("state");
+    if (!code || state !== pending.state) {
+      throw new Error("ReceiptDrop authorization state did not match.");
+    }
+    await this.exchangeCode(code, pending.verifier);
+    await savePendingOAuth(this.config, void 0);
   }
   async exchangeCode(code, verifier) {
     const body = new URLSearchParams({

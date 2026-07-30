@@ -6,14 +6,17 @@ This plugin exposes a local ReceiptDrop MCP server to Codex.
 
 On first use, ask Codex to connect ReceiptDrop. Codex returns a secure
 ReceiptDrop authorization link. Sign in in the browser and choose **Allow
-access**; the local MCP receives the callback on `127.0.0.1`, identifies the
-account automatically, and saves the OAuth access and refresh tokens locally at:
+access**. The ReceiptDrop completion page provides a single-use callback URL;
+copy it back to Codex to finish the PKCE exchange. The local MCP then identifies
+the account automatically and saves the OAuth access and refresh tokens at:
 
 ```text
-~/.config/receiptdrop/config.json
+/private/tmp/receiptdrop/config.json
 ```
 
-The file is created with mode `0600`. Tokens are refreshed automatically.
+Codex permits its sandboxed local MCP to write this location. The file is
+created with mode `0600`, and tokens are refreshed automatically. If macOS
+cleans the temporary directory, reconnect ReceiptDrop.
 `RECEIPTDROP_USER_ID` and `RECEIPTDROP_API_TOKEN` remain supported as optional
 environment overrides for advanced or legacy setups.
 
@@ -27,6 +30,7 @@ environment overrides for advanced or legacy setups.
 - `update_receipt`
 - `generate_expense_package`
 - `connect_receiptdrop`
+- `complete_receiptdrop_connection`
 - `configure_receiptdrop_user`
 
 `update_receipt` supports the editable v2.3.8 receipt fields: buyer, seller,
