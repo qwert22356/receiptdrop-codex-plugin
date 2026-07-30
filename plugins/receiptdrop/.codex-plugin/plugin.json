@@ -1,6 +1,6 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260729112015",
+  "version": "0.1.1+codex.20260730144110",
   "description": "Upload, search, view, and update ReceiptDrop receipts, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
@@ -30,7 +30,7 @@
     ],
     "websiteURL": "https://receiptdrop.dev",
     "defaultPrompt": [
-      "Configure my ReceiptDrop user UUID.",
+      "Connect my ReceiptDrop account.",
       "Upload these receipt files to ReceiptDrop.",
       "Show my ReceiptDrop receipts uploaded today.",
       "Check my ReceiptDrop account and remaining receipt quota.",

@@ -2,16 +2,20 @@
 
 This plugin exposes a local ReceiptDrop MCP server to Codex.
 
-## Account configuration
+## Account connection
 
-On first use, ask Codex to configure your ReceiptDrop user UUID. The plugin saves
-it locally at:
+On first use, ask Codex to connect ReceiptDrop. Codex returns a secure
+ReceiptDrop authorization link. Sign in in the browser and choose **Allow
+access**; the local MCP receives the callback on `127.0.0.1`, identifies the
+account automatically, and saves the OAuth access and refresh tokens locally at:
 
 ```text
 ~/.config/receiptdrop/config.json
 ```
 
-`RECEIPTDROP_USER_ID` is also supported as an optional environment override.
+The file is created with mode `0600`. Tokens are refreshed automatically.
+`RECEIPTDROP_USER_ID` and `RECEIPTDROP_API_TOKEN` remain supported as optional
+environment overrides for advanced or legacy setups.
 
 ## Included tools
 
@@ -22,6 +26,7 @@ it locally at:
 - `upload_receipts`
 - `update_receipt`
 - `generate_expense_package`
+- `connect_receiptdrop`
 - `configure_receiptdrop_user`
 
 `update_receipt` supports the editable v2.3.8 receipt fields: buyer, seller,
@@ -45,8 +50,8 @@ the invoice.
 `get_account_quota` follows the v1.8.4 account screen and returns the configured
 user's subscription status, virtual receipt inbox, bonus quota, monthly quota,
 remaining/combined receipt allowance, and AI Voice quick-note and journey
-allowances. AI Voice requires the user's Supabase access token in
-`RECEIPTDROP_API_TOKEN`.
+allowances. With OAuth, the AI Voice query uses the connected user's access
+token automatically.
 
 Generated packages are downloaded under:
 

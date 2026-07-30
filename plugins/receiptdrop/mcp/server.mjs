@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -15457,8 +15455,12 @@ var ReceiptDropClient = class {
   config;
   fetchImpl;
   userId;
+  beforeRequest;
   setUserId(userId) {
     this.userId = userId;
+  }
+  setBeforeRequest(callback) {
+    this.beforeRequest = callback;
   }
   requireUserId() {
     if (!this.userId) {
@@ -15472,6 +15474,7 @@ var ReceiptDropClient = class {
     return this.requestJsonAt(this.config.apiBase, pathname, body);
   }
   async requestJsonAt(baseUrl, pathname, body) {
+    await this.beforeRequest?.();
     const response = await this.fetchImpl(`${baseUrl}${pathname}`, {
       method: "POST",
       headers: {
@@ -15517,6 +15520,7 @@ var ReceiptDropClient = class {
     return result;
   }
   async getVoiceUsage() {
+    await this.beforeRequest?.();
     if (!this.config.apiToken) {
       throw new Error(
         "AI Voice quota requires RECEIPTDROP_API_TOKEN to contain the user's Supabase access token."
@@ -15633,7 +15637,9 @@ var ReceiptDropClient = class {
       throw new Error("ReceiptDrop recent uploads query did not return an array.");
     }
     return result.filter((receipt) => receipt.user_id === userId).sort(
-      (left, right) => String(right.create_time ?? "").localeCompare(String(left.create_time ?? ""))
+      (left, right) => String(right.create_time ?? right.created_at ?? "").localeCompare(
+        String(left.create_time ?? left.created_at ?? "")
+      )
     ).slice(0, limit);
   }
   async getReceiptsByIds(receiptIds) {
@@ -15921,6 +15927,27 @@ var ReceiptDropClient = class {
       downloadedFiles
     };
   }
+  async generateExpensePackageLink(receiptIds, requestedTitle) {
+    if (!receiptIds.length) throw new Error("At least one receipt ID is required.");
+    const title = requestedTitle.trim();
+    if (!title) throw new Error("A non-empty package title is required.");
+    const receipts = await this.getReceiptsByIds(receiptIds);
+    const before = await this.getSummaries();
+    const generateResponse = await this.generate(title, receipts);
+    const responseUrls = collectUrls(generateResponse);
+    const summary = await this.waitForSummary(
+      title,
+      new Set(before.map((item) => item.id))
+    );
+    const downloadUrl = summary?.download_url ?? responseUrls[0] ?? null;
+    return {
+      title,
+      receiptIds: receipts.map((receipt) => receipt.ind),
+      downloadUrl,
+      summaryId: summary?.id ?? null,
+      ready: Boolean(downloadUrl)
+    };
+  }
 };
 
 // src/config.ts
@@ -15954,6 +15981,12 @@ function loadConfig(env = process.env) {
     voiceApiBase,
     voiceApiKey: env.RECEIPTDROP_VOICE_API_KEY?.trim() || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoYXZqeGtyaHN2ZXpvc296d21hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzNjk4MzksImV4cCI6MjA2Mzk0NTgzOX0.0UBw9O81BNRXTkosKNCZCVcLrZjiUHVj-Rnxoadt0Ec",
     apiToken: env.RECEIPTDROP_API_TOKEN?.trim() || void 0,
+    oauthClientId: env.RECEIPTDROP_OAUTH_CLIENT_ID?.trim() || "9fc77f06-61ab-4458-b4f8-b1e8f3d3c91c",
+    oauthRedirectUri: env.RECEIPTDROP_OAUTH_REDIRECT_URI?.trim() || "http://127.0.0.1:43821/oauth/callback",
+    supabaseAuthUrl: (env.RECEIPTDROP_SUPABASE_AUTH_URL ?? "https://xhavjxkrhsvezosozwma.supabase.co/auth/v1").replace(/\/+$/, ""),
+    mcpPublicUrl: (env.RECEIPTDROP_MCP_PUBLIC_URL ?? "https://mcp.receiptdrop.dev").replace(/\/+$/, ""),
+    httpHost: env.RECEIPTDROP_HTTP_HOST?.trim() || "127.0.0.1",
+    httpPort: Number.parseInt(env.RECEIPTDROP_HTTP_PORT ?? "3000", 10),
     downloadDir: path2.resolve(
       env.RECEIPTDROP_DOWNLOAD_DIR ?? "/private/tmp/receiptdrop-expense"
     ),
@@ -15981,6 +16014,31 @@ async function saveUserId(config2, userId) {
 `,
     { encoding: "utf8", mode: 384 }
   );
+}
+async function loadSavedAuthSession(config2) {
+  try {
+    const parsed = JSON.parse(await readFile2(config2.configFile, "utf8"));
+    if (typeof parsed.userId === "string" && typeof parsed.accessToken === "string" && typeof parsed.refreshToken === "string" && typeof parsed.expiresAt === "number") {
+      return {
+        userId: parsed.userId,
+        accessToken: parsed.accessToken,
+        refreshToken: parsed.refreshToken,
+        expiresAt: parsed.expiresAt
+      };
+    }
+    return void 0;
+  } catch (error2) {
+    if (error2.code === "ENOENT") return void 0;
+    throw error2;
+  }
+}
+async function saveAuthSession(config2, session) {
+  await mkdir2(path2.dirname(config2.configFile), { recursive: true, mode: 448 });
+  await writeFile2(config2.configFile, `${JSON.stringify(session, null, 2)}
+`, {
+    encoding: "utf8",
+    mode: 384
+  });
 }
 
 // node_modules/zod/v3/external.js
@@ -24080,18 +24138,50 @@ function asText(value) {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }]
   };
 }
-function createServer(client, config2) {
+function createServer(client, config2, oauth) {
   const server = new McpServer({
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the ReceiptDrop plugin or using another appropriate method. Invite users who want to contribute the missing capability to open an issue or submit a pull request at https://github.com/qwert22356/receiptdrop-codex-plugin using their own GitHub account. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop and present its authorization_url as a clickable link; never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the ReceiptDrop plugin or using another appropriate method. Invite users who want to contribute a missing capability to open an issue or submit a pull request at https://github.com/qwert22356/receiptdrop-codex-plugin using their own GitHub account. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
+  server.registerTool(
+    "connect_receiptdrop",
+    {
+      title: "Connect ReceiptDrop account",
+      description: "Start secure ReceiptDrop OAuth login. Present the returned authorization_url as a clickable link. After the user approves access in the browser, their account is connected automatically.",
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async () => {
+      if (!oauth) {
+        throw new Error("ReceiptDrop OAuth is unavailable in this server mode.");
+      }
+      if (oauth.isConnected()) {
+        await oauth.ensureSession();
+        return asText({
+          connected: true,
+          message: "ReceiptDrop is already connected."
+        });
+      }
+      const result = await oauth.beginAuthorization();
+      return asText({
+        connected: false,
+        ...result,
+        message: "Open the authorization URL, sign in to ReceiptDrop, and choose Allow access. Then retry your ReceiptDrop request."
+      });
+    }
+  );
   server.registerTool(
     "configure_receiptdrop_user",
     {
       title: "Configure ReceiptDrop account",
-      description: "Save the current user's ReceiptDrop UUID locally on this Mac. Run once before searching receipts.",
+      description: "Legacy fallback only: save a ReceiptDrop UUID locally. Prefer connect_receiptdrop OAuth for normal account connection.",
       inputSchema: {
         user_id: external_exports.string().uuid().describe("ReceiptDrop/Supabase user UUID")
       },
@@ -24409,12 +24499,199 @@ function createServer(client, config2) {
   return server;
 }
 
+// src/oauth.ts
+import { createHash, randomBytes } from "node:crypto";
+import { createServer as createServer2 } from "node:http";
+
+// src/auth.ts
+async function authenticateSupabaseToken(token, config2, fetchImpl = fetch) {
+  const authUrl = config2.supabaseAuthUrl ?? "https://xhavjxkrhsvezosozwma.supabase.co/auth/v1";
+  if (!config2.voiceApiKey) {
+    throw new Error("ReceiptDrop Supabase publishable key is not configured.");
+  }
+  const response = await fetchImpl(`${authUrl}/user`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      apikey: config2.voiceApiKey,
+      accept: "application/json"
+    },
+    signal: AbortSignal.timeout(8e3)
+  });
+  if (!response.ok) {
+    throw new Error("ReceiptDrop access token is invalid or expired.");
+  }
+  const user = await response.json();
+  if (typeof user.id !== "string" || !user.id) {
+    throw new Error("ReceiptDrop authentication response did not include a user.");
+  }
+  return {
+    id: user.id,
+    email: typeof user.email === "string" ? user.email : void 0
+  };
+}
+
+// src/oauth.ts
+function base64Url(value) {
+  return value.toString("base64url");
+}
+var LocalOAuthManager = class {
+  constructor(config2, client, fetchImpl = fetch) {
+    this.config = config2;
+    this.client = client;
+    this.fetchImpl = fetchImpl;
+    this.client.setBeforeRequest(() => this.ensureSession());
+  }
+  config;
+  client;
+  fetchImpl;
+  session;
+  callbackServer;
+  pendingState;
+  pendingVerifier;
+  async initialize() {
+    this.session = await loadSavedAuthSession(this.config);
+    if (this.session) await this.ensureSession();
+  }
+  async ensureSession() {
+    if (!this.session) return;
+    if (this.session.expiresAt <= Date.now() + 6e4) {
+      await this.refresh();
+    }
+    this.applySession(this.session);
+  }
+  isConnected() {
+    return Boolean(this.session);
+  }
+  async beginAuthorization() {
+    const clientId = this.config.oauthClientId;
+    const redirectUri = this.config.oauthRedirectUri;
+    const authBase = this.config.supabaseAuthUrl;
+    if (!clientId || !redirectUri || !authBase) {
+      throw new Error("ReceiptDrop local OAuth is not configured.");
+    }
+    await this.startCallbackServer(new URL(redirectUri));
+    const verifier = base64Url(randomBytes(48));
+    const challenge = base64Url(createHash("sha256").update(verifier).digest());
+    const state = base64Url(randomBytes(24));
+    this.pendingVerifier = verifier;
+    this.pendingState = state;
+    const url = new URL(`${authBase}/oauth/authorize`);
+    url.search = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      state,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      scope: "openid email profile"
+    }).toString();
+    return { authorization_url: url.toString() };
+  }
+  async startCallbackServer(callback) {
+    if (this.callbackServer?.listening) return;
+    const port = Number(callback.port);
+    if (callback.protocol !== "http:" || callback.hostname !== "127.0.0.1" || !port) {
+      throw new Error("ReceiptDrop OAuth callback must use a fixed 127.0.0.1 HTTP port.");
+    }
+    this.callbackServer = createServer2(async (request, response) => {
+      const requestUrl = new URL(request.url ?? "/", callback.origin);
+      if (requestUrl.pathname !== callback.pathname) {
+        response.writeHead(404).end("Not found");
+        return;
+      }
+      try {
+        const error2 = requestUrl.searchParams.get("error");
+        if (error2) throw new Error(requestUrl.searchParams.get("error_description") ?? error2);
+        const code = requestUrl.searchParams.get("code");
+        const state = requestUrl.searchParams.get("state");
+        if (!code || state !== this.pendingState || !this.pendingVerifier) {
+          throw new Error("Invalid ReceiptDrop OAuth callback.");
+        }
+        await this.exchangeCode(code, this.pendingVerifier);
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end("<!doctype html><meta charset=utf-8><title>ReceiptDrop connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;padding:24px}b{background:#ffe500;padding:4px 8px;border-radius:6px}</style><h1>ReceiptDrop connected</h1><p>You can close this tab and return to <b>Codex</b>.</p>");
+      } catch (error2) {
+        response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+        response.end(error2 instanceof Error ? error2.message : String(error2));
+      } finally {
+        this.pendingState = void 0;
+        this.pendingVerifier = void 0;
+        this.callbackServer?.close();
+      }
+    });
+    await new Promise((resolve, reject) => {
+      this.callbackServer.once("error", reject);
+      this.callbackServer.listen(port, "127.0.0.1", resolve);
+    });
+  }
+  async exchangeCode(code, verifier) {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: this.config.oauthClientId,
+      redirect_uri: this.config.oauthRedirectUri,
+      code_verifier: verifier
+    });
+    await this.acceptTokenResponse(body);
+  }
+  async refresh() {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: this.session.refreshToken,
+      client_id: this.config.oauthClientId
+    });
+    await this.acceptTokenResponse(body, this.session.refreshToken);
+  }
+  async acceptTokenResponse(body, fallbackRefreshToken) {
+    const response = await this.fetchImpl(
+      `${this.config.supabaseAuthUrl}/oauth/token`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        body,
+        signal: AbortSignal.timeout(1e4)
+      }
+    );
+    const result = await response.json();
+    if (!response.ok || typeof result.access_token !== "string") {
+      throw new Error(
+        typeof result.error_description === "string" ? result.error_description : "ReceiptDrop OAuth token exchange failed."
+      );
+    }
+    const user = await authenticateSupabaseToken(
+      result.access_token,
+      this.config,
+      this.fetchImpl
+    );
+    const refreshToken = typeof result.refresh_token === "string" ? result.refresh_token : fallbackRefreshToken;
+    if (!refreshToken) throw new Error("ReceiptDrop OAuth did not return a refresh token.");
+    this.session = {
+      userId: user.id,
+      accessToken: result.access_token,
+      refreshToken,
+      expiresAt: Date.now() + (typeof result.expires_in === "number" ? result.expires_in : 3600) * 1e3
+    };
+    await saveAuthSession(this.config, this.session);
+    this.applySession(this.session);
+  }
+  applySession(session) {
+    this.config.userId = session.userId;
+    this.config.apiToken = session.accessToken;
+    this.client.setUserId(session.userId);
+  }
+};
+
 // src/index.ts
 async function main() {
   const config2 = loadConfig();
   config2.userId = await loadSavedUserId(config2);
   const client = new ReceiptDropClient(config2);
-  const server = createServer(client, config2);
+  const oauth = new LocalOAuthManager(config2, client);
+  await oauth.initialize();
+  const server = createServer(client, config2, oauth);
   await server.connect(new StdioServerTransport());
 }
 main().catch((error2) => {
