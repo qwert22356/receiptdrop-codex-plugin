@@ -24178,7 +24178,7 @@ function createServer(client, config2, oauth) {
     "connect_receiptdrop",
     {
       title: "Connect ReceiptDrop account",
-      description: "Start secure ReceiptDrop OAuth login. Present authorization_url as a clickable link. After approval, ask the user to copy the redirected ReceiptDrop callback URL, then call complete_receiptdrop_connection.",
+      description: "Start secure ReceiptDrop OAuth login. The tool returns a native resource link named \u8FDE\u63A5 ReceiptDrop \u8D26\u6237; present that link directly and never rewrite its long URI into response text. After approval, ask the user to copy the redirected ReceiptDrop callback URL, then call complete_receiptdrop_connection.",
       inputSchema: {},
       annotations: {
         readOnlyHint: false,
@@ -24199,11 +24199,21 @@ function createServer(client, config2, oauth) {
         });
       }
       const result = await oauth.beginAuthorization();
-      return asText({
-        connected: false,
-        ...result,
-        message: "Open the authorization URL, sign in, and choose Allow access. On the ReceiptDrop completion page, copy the callback URL and paste it into Codex."
-      });
+      return {
+        content: [
+          {
+            type: "resource_link",
+            uri: result.authorization_url,
+            name: "\u8FDE\u63A5 ReceiptDrop \u8D26\u6237",
+            description: "\u5728\u6D4F\u89C8\u5668\u767B\u5F55\u5E76\u5141\u8BB8\u8BBF\u95EE\uFF0C\u7136\u540E\u590D\u5236 ReceiptDrop \u5B8C\u6210\u9875\u9762\u63D0\u4F9B\u7684\u56DE\u8C03 URL\u3002",
+            mimeType: "text/html"
+          },
+          {
+            type: "text",
+            text: "\u8BF7\u6253\u5F00\u4E0A\u65B9\u201C\u8FDE\u63A5 ReceiptDrop \u8D26\u6237\u201D\u94FE\u63A5\u3002\u6388\u6743\u540E\u590D\u5236\u5B8C\u6210\u9875\u9762\u4E0A\u7684\u56DE\u8C03 URL\uFF0C\u5E76\u7C98\u8D34\u56DE Codex\u3002\u4E0D\u8981\u5728\u56DE\u590D\u6B63\u6587\u4E2D\u91CD\u65B0\u8F93\u51FA\u6388\u6743\u94FE\u63A5\u3002"
+          }
+        ]
+      };
     }
   );
   server.registerTool(
