@@ -1,6 +1,6 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260731153053",
+  "version": "0.1.1+codex.20260731154842",
   "description": "Manage ReceiptDrop receipts and Footprints, cross-check trips, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"

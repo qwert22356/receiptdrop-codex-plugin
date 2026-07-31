@@ -15395,6 +15395,13 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 var delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+function isoSeconds(value) {
+  const date3 = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date3.getTime())) {
+    throw new Error("Footprint timestamp must be a valid ISO-8601 date and time.");
+  }
+  return date3.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
 function numberValue(value) {
   const result = Number(value ?? 0);
   return Number.isFinite(result) ? result : 0;
@@ -15736,7 +15743,7 @@ var ReceiptDropClient = class {
     const payload = {
       id: randomUUID(),
       user_id: userId,
-      occurred_at: input.occurredAt,
+      occurred_at: isoSeconds(input.occurredAt),
       ...this.categoryFields(category),
       note: input.note ?? null,
       place_name: input.placeName ?? null,
@@ -15745,7 +15752,7 @@ var ReceiptDropClient = class {
       // A newly recorded activity is always an uncompleted expense task.
       // Completion can only be changed later through update_footprint.
       is_completed: false,
-      updated_at: (/* @__PURE__ */ new Date()).toISOString(),
+      updated_at: isoSeconds(/* @__PURE__ */ new Date()),
       deleted_at: null,
       source: "chatgpt"
     };
@@ -15756,9 +15763,8 @@ var ReceiptDropClient = class {
     return rows[0];
   }
   async updateFootprint(footprintId, expectedUpdatedAt, updates) {
-    const payload = { updated_at: (/* @__PURE__ */ new Date()).toISOString() };
+    const payload = { updated_at: isoSeconds(/* @__PURE__ */ new Date()) };
     const fields = [
-      ["occurredAt", "occurred_at"],
       ["note", "note"],
       ["placeName", "place_name"],
       ["latitude", "latitude"],
@@ -15767,6 +15773,9 @@ var ReceiptDropClient = class {
     ];
     for (const [inputKey, databaseKey] of fields) {
       if (updates[inputKey] !== void 0) payload[databaseKey] = updates[inputKey];
+    }
+    if (updates.occurredAt !== void 0) {
+      payload.occurred_at = isoSeconds(updates.occurredAt);
     }
     if (updates.categoryId !== void 0) {
       const category = await this.resolveFootprintCategory(updates.categoryId);
@@ -15778,7 +15787,7 @@ var ReceiptDropClient = class {
     return this.mutateOneFootprint(footprintId, expectedUpdatedAt, payload, "update");
   }
   async deleteFootprint(footprintId, expectedUpdatedAt) {
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now = isoSeconds(/* @__PURE__ */ new Date());
     return this.mutateOneFootprint(
       footprintId,
       expectedUpdatedAt,
