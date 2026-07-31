@@ -1,8 +1,9 @@
 # ReceiptDrop for Codex
 
-ReceiptDrop's Codex plugin uploads, searches, views, and updates receipts, lets
-the user confirm which expenses to reimburse, runs ReceiptDrop Generate, and
-downloads the generated package.
+ReceiptDrop's Codex plugin uploads, searches, views, and updates receipts,
+queries synced Footprint activities, cross-checks business-trip candidates,
+lets the user confirm which expenses to reimburse, runs ReceiptDrop Generate,
+and downloads the generated package.
 
 ## Install
 
@@ -17,13 +18,13 @@ Start a new Codex task after installation.
 
 ## First use
 
-Configure the ReceiptDrop user UUID once:
+Connect the ReceiptDrop account with OAuth:
 
 ```text
-Configure my ReceiptDrop user UUID: <your-uuid>
+Connect my ReceiptDrop account.
 ```
 
-The UUID is stored only on the current computer at:
+The OAuth session is stored only on the current computer at:
 
 ```text
 ~/.config/receiptdrop/config.json
@@ -42,6 +43,8 @@ Find my receipts from July 1, 2026.
 - `get_recent_uploads`
 - `get_account_quota`
 - `get_receipt_attachment`
+- `list_footprints`
+- `find_business_trip_receipts`
 - `upload_receipts`
 - `update_receipt`
 - `generate_expense_package`
@@ -54,5 +57,5 @@ Generated packages are downloaded under:
 
 ## Security
 
-This preview uses a locally configured ReceiptDrop user UUID. It does not
-contain user IDs, API keys, access tokens, receipt data, or generated files.
+The bundled plugin contains no user IDs, access tokens, receipt data, Footprint
+data, or generated files. OAuth tokens remain in the local ReceiptDrop config.

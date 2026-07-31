@@ -15416,6 +15416,62 @@ var MIME_TYPES = {
   ".bmp": "image/bmp"
 };
 var MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+var FOOTPRINT_MEAL_TERMS = [
+  "meal",
+  "meals",
+  "food",
+  "restaurant",
+  "dining",
+  "breakfast",
+  "lunch",
+  "dinner",
+  "cafe",
+  "coffee",
+  "comida",
+  "restaurante",
+  "desayuno",
+  "almuerzo",
+  "cena",
+  "\u9910",
+  "\u996D",
+  "\u5496\u5561"
+];
+var FOOTPRINT_TRANSPORT_TERMS = [
+  "transport",
+  "travel",
+  "flight",
+  "train",
+  "taxi",
+  "metro",
+  "bus",
+  "parking",
+  "toll",
+  "fuel",
+  "transporte",
+  "viaje",
+  "vuelo",
+  "tren",
+  "\u4EA4\u901A",
+  "\u822A\u73ED",
+  "\u706B\u8F66",
+  "\u51FA\u79DF\u8F66",
+  "\u5730\u94C1",
+  "\u516C\u4EA4"
+];
+function footprintText(item) {
+  return [item.category_key, item.category, item.note, item.place_name].filter(Boolean).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+}
+function monthRange(year, month) {
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+  const format = (date3) => {
+    const localYear = date3.getFullYear();
+    const localMonth = String(date3.getMonth() + 1).padStart(2, "0");
+    const day = String(date3.getDate()).padStart(2, "0");
+    return `${localYear}-${localMonth}-${day}`;
+  };
+  return { start: format(start), end: format(end) };
+}
 function collectUrls(value, output = []) {
   if (typeof value === "string" && /^https?:\/\//i.test(value)) {
     output.push(value);
@@ -15545,6 +15601,81 @@ var ReceiptDropClient = class {
       throw new Error("ReceiptDrop AI Voice usage query returned an invalid response.");
     }
     return result;
+  }
+  async listFootprints(options = {}) {
+    const userId = this.requireUserId();
+    await this.beforeRequest?.();
+    if (!this.config.apiToken) {
+      throw new Error(
+        "Footprint history requires a connected ReceiptDrop OAuth account."
+      );
+    }
+    let startDate = options.startDate;
+    let endDate = options.endDate;
+    if (options.year && options.month && !startDate && !endDate) {
+      const range = monthRange(options.year, options.month);
+      startDate = range.start;
+      endDate = range.end;
+    }
+    for (const value of [startDate, endDate]) {
+      if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw new Error("Footprint dates must use YYYY-MM-DD.");
+      }
+    }
+    if (startDate && endDate && startDate > endDate) {
+      throw new Error("Footprint start date cannot be later than end date.");
+    }
+    const url = new URL(
+      `${this.config.supabaseRestBase ?? "https://xhavjxkrhsvezosozwma.supabase.co/rest/v1"}/expense_footprints`
+    );
+    url.searchParams.set(
+      "select",
+      "id,user_id,occurred_at,category,category_key,category_icon,note,place_name,latitude,longitude,is_completed,updated_at,deleted_at"
+    );
+    url.searchParams.set("user_id", `eq.${userId}`);
+    url.searchParams.set("deleted_at", "is.null");
+    url.searchParams.set("order", "occurred_at.asc");
+    url.searchParams.set("limit", String(Math.min(options.limit ?? 500, 500)));
+    if (startDate) {
+      const localStart = /* @__PURE__ */ new Date(`${startDate}T00:00:00`);
+      url.searchParams.set("occurred_at", `gte.${localStart.toISOString()}`);
+    }
+    if (endDate) {
+      const exclusiveEnd = /* @__PURE__ */ new Date(`${endDate}T00:00:00`);
+      exclusiveEnd.setDate(exclusiveEnd.getDate() + 1);
+      const nextDate = [
+        exclusiveEnd.getFullYear(),
+        String(exclusiveEnd.getMonth() + 1).padStart(2, "0"),
+        String(exclusiveEnd.getDate()).padStart(2, "0")
+      ].join("-");
+      url.searchParams.append(
+        "occurred_at",
+        `lt.${(/* @__PURE__ */ new Date(`${nextDate}T00:00:00`)).toISOString()}`
+      );
+    }
+    if (options.includeCompleted === false) {
+      url.searchParams.set("is_completed", "eq.false");
+    }
+    const response = await this.fetchImpl(url, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.config.apiToken}`,
+        ...this.config.voiceApiKey ? { apikey: this.config.voiceApiKey } : {}
+      }
+    });
+    const items = await this.parseResponse(response);
+    if (!Array.isArray(items)) {
+      throw new Error("ReceiptDrop Footprint query returned an invalid response.");
+    }
+    const query = options.query?.toLocaleLowerCase();
+    const terms = options.activity === "meals" ? FOOTPRINT_MEAL_TERMS : options.activity === "transport" ? FOOTPRINT_TRANSPORT_TERMS : null;
+    return items.filter((item) => {
+      if (item.user_id !== userId || item.deleted_at) return false;
+      const text = footprintText(item);
+      if (terms && !terms.some((term) => text.includes(term))) return false;
+      if (query && !text.includes(query)) return false;
+      return true;
+    });
   }
   async parseResponse(response) {
     const text = await response.text();
@@ -15976,11 +16107,19 @@ function loadConfig(env = process.env) {
       "RECEIPTDROP_VOICE_API_BASE must use HTTPS (localhost is allowed for tests)."
     );
   }
+  const supabaseRestBase = (env.RECEIPTDROP_SUPABASE_REST_BASE ?? "https://xhavjxkrhsvezosozwma.supabase.co/rest/v1").replace(/\/+$/, "");
+  const parsedRestBase = new URL(supabaseRestBase);
+  if (parsedRestBase.protocol !== "https:" && parsedRestBase.hostname !== "localhost") {
+    throw new Error(
+      "RECEIPTDROP_SUPABASE_REST_BASE must use HTTPS (localhost is allowed for tests)."
+    );
+  }
   return {
     userId: env.RECEIPTDROP_USER_ID?.trim() || void 0,
     apiBase,
     accountApiBase,
     voiceApiBase,
+    supabaseRestBase,
     voiceApiKey: env.RECEIPTDROP_VOICE_API_KEY?.trim() || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoYXZqeGtyaHN2ZXpvc296d21hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzNjk4MzksImV4cCI6MjA2Mzk0NTgzOX0.0UBw9O81BNRXTkosKNCZCVcLrZjiUHVj-Rnxoadt0Ec",
     apiToken: env.RECEIPTDROP_API_TOKEN?.trim() || void 0,
     oauthClientId: env.RECEIPTDROP_OAUTH_CLIENT_ID?.trim() || "9fc77f06-61ab-4458-b4f8-b1e8f3d3c91c",
@@ -24237,6 +24376,25 @@ function searchableText(receipt) {
     receipt.ocr
   ].filter(Boolean).join(" "));
 }
+function classifyFootprint(footprint) {
+  const text = normalize([
+    footprint.category_key,
+    footprint.category,
+    footprint.note
+  ].filter(Boolean).join(" "));
+  if (MEAL_TERMS.some((term) => text.includes(term))) return "meal";
+  if (TRANSPORT_TERMS.some((term) => text.includes(term))) return "transport";
+  return "other";
+}
+function localDateOfFootprint(footprint) {
+  const date3 = new Date(footprint.occurred_at);
+  if (!Number.isFinite(date3.getTime())) return null;
+  return [
+    date3.getFullYear(),
+    String(date3.getMonth() + 1).padStart(2, "0"),
+    String(date3.getDate()).padStart(2, "0")
+  ].join("-");
+}
 function classifyTravelReceipt(receipt) {
   const category = normalize(receipt.category);
   if (MEAL_TERMS.some((term) => category.includes(term))) return "meal";
@@ -24311,6 +24469,50 @@ function analyzeBusinessTripReceipts(receipts, year, month, homeLocation) {
     next_step: "Show the inferred route/window and every candidate. Ask the user to confirm exact receipt IDs, then call generate_expense_package."
   };
 }
+function addFootprintCrossCheck(analysis, footprints) {
+  const startDate = analysis.inference.start_date;
+  const endDate = analysis.inference.end_date;
+  const receiptDates = {
+    meal: new Set(analysis.meal_candidates.map((item) => item.date).filter(Boolean)),
+    transport: new Set(
+      analysis.transport_candidates.map((item) => item.date).filter(Boolean)
+    )
+  };
+  const events = footprints.map((footprint) => ({
+    footprint,
+    kind: classifyFootprint(footprint),
+    date: localDateOfFootprint(footprint)
+  })).filter((event) => {
+    if (event.kind === "other" || !event.date) return false;
+    return startDate && endDate ? event.date >= startDate && event.date <= endDate : true;
+  });
+  const summarizedEvents = events.map(({ footprint, kind, date: date3 }) => ({
+    footprint_id: footprint.id,
+    kind,
+    occurred_at: footprint.occurred_at,
+    local_date: date3,
+    category: footprint.category_key ?? footprint.category ?? null,
+    note: footprint.note ?? null,
+    place: footprint.place_name ?? null,
+    is_completed: footprint.is_completed
+  }));
+  const possibleGaps = summarizedEvents.filter(
+    (event) => event.local_date && !receiptDates[event.kind].has(event.local_date)
+  ).map((event) => ({
+    ...event,
+    reason: `A ${event.kind} Footprint exists on this date, but no same-day ${event.kind} receipt candidate was found.`
+  }));
+  return {
+    ...analysis,
+    footprint_check: {
+      enabled: true,
+      role: "secondary_evidence_only",
+      events_in_candidate_window: summarizedEvents,
+      possible_gaps: possibleGaps,
+      warning: "Footprints may be incomplete or imprecise. They do not add, remove, or reclassify receipts and must not be treated as proof that a receipt is missing."
+    }
+  };
+}
 
 // src/server.ts
 function asText(value) {
@@ -24323,7 +24525,7 @@ function createServer(client, config2, oauth) {
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. Questions about where the user ate, travelled, or spent their day should use list_footprints; questions about invoices, amounts, reimbursement, or saved proof of purchase should use search_receipts. Use both only for explicit completeness or cross-check requests, and clearly separate Footprint activity evidence from receipt evidence. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Enable its Footprint check only when the user asks to cross-check, find missing receipts, or use Footprints. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. Footprints are secondary evidence and must never automatically add, remove, or reclassify receipts. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
   server.registerTool(
     "connect_receiptdrop",
@@ -24488,6 +24690,60 @@ function createServer(client, config2, oauth) {
     )
   );
   server.registerTool(
+    "list_footprints",
+    {
+      title: "List ReceiptDrop Footprints",
+      description: "Query the authenticated user's synced Footprint activity history by month or date range. Use this for questions about where the user ate, travelled, or recorded activities. This is activity evidence, not receipt or payment evidence.",
+      inputSchema: {
+        start_date: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        end_date: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        year: external_exports.number().int().min(2e3).max(2100).optional(),
+        month: external_exports.number().int().min(1).max(12).optional(),
+        activity: external_exports.enum(["all", "meals", "transport"]).default("all"),
+        query: external_exports.string().min(1).optional().describe(
+          "Optional text to match category, note, or place"
+        ),
+        include_completed: external_exports.boolean().default(true),
+        limit: external_exports.number().int().min(1).max(500).default(500)
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (input) => {
+      const footprints = await client.listFootprints({
+        startDate: input.start_date,
+        endDate: input.end_date,
+        year: input.year,
+        month: input.month,
+        activity: input.activity,
+        query: input.query,
+        includeCompleted: input.include_completed,
+        limit: input.limit
+      });
+      const places = [...new Set(footprints.map((item) => item.place_name?.trim()).filter((value) => Boolean(value)))];
+      return asText({
+        source: "ReceiptDrop Footprints",
+        evidence_type: "user-recorded activity; not proof of purchase",
+        count: footprints.length,
+        places,
+        footprints: footprints.map((item) => ({
+          footprint_id: item.id,
+          occurred_at: item.occurred_at,
+          category: item.category_key ?? item.category ?? null,
+          note: item.note ?? null,
+          place: item.place_name ?? null,
+          latitude: item.latitude ?? null,
+          longitude: item.longitude ?? null,
+          is_completed: item.is_completed
+        }))
+      });
+    }
+  );
+  server.registerTool(
     "find_business_trip_receipts",
     {
       title: "Find business-trip meal and transport receipts",
@@ -24497,6 +24753,9 @@ function createServer(client, config2, oauth) {
         month: external_exports.number().int().min(1).max(12),
         home_location: external_exports.string().min(1).optional().describe(
           "Optional home/base city, such as Madrid, for interpreting location changes"
+        ),
+        include_footprint_check: external_exports.boolean().default(false).describe(
+          "Enable only when the user explicitly asks to cross-check Footprints or look for possibly missing receipts"
         )
       },
       annotations: {
@@ -24506,12 +24765,24 @@ function createServer(client, config2, oauth) {
         openWorldHint: true
       }
     },
-    async ({ year, month, home_location }) => {
+    async ({ year, month, home_location, include_footprint_check }) => {
       const resolvedYear = year ?? (/* @__PURE__ */ new Date()).getFullYear();
       const receipts = await client.searchReceipts({ year: resolvedYear, month, limit: 500 });
-      return asText(
-        analyzeBusinessTripReceipts(receipts, resolvedYear, month, home_location)
+      const analysis = analyzeBusinessTripReceipts(
+        receipts,
+        resolvedYear,
+        month,
+        home_location
       );
+      if (!include_footprint_check) return asText(analysis);
+      const footprints = await client.listFootprints({
+        year: resolvedYear,
+        month,
+        activity: "all",
+        includeCompleted: true,
+        limit: 500
+      });
+      return asText(addFootprintCrossCheck(analysis, footprints));
     }
   );
   server.registerTool(

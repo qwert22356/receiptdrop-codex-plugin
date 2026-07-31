@@ -1,7 +1,7 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260731101546",
-  "description": "Upload, search, view, and update ReceiptDrop receipts, and generate reimbursement packages from Codex.",
+  "version": "0.1.1+codex.20260731145844",
+  "description": "Upload, search, view, and update ReceiptDrop receipts, query Footprints, cross-check trips, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
   },
@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "ReceiptDrop",
     "shortDescription": "Upload, find, view, and manage receipts.",
-    "longDescription": "Connect Codex to your ReceiptDrop account to upload receipt files, search and view attachments, update receipt details, confirm expenses, run Generate, and download reimbursement packages.",
+    "longDescription": "Connect Codex to your ReceiptDrop account to query synced Footprint activities, upload and search receipts, cross-check business trips, view attachments, update details, confirm expenses, and generate reimbursement packages.",
     "developerName": "ReceiptDrop",
     "category": "Productivity",
     "capabilities": [
@@ -24,6 +24,8 @@
       "View",
       "Recent uploads",
       "Business trip receipts",
+      "Footprint activity history",
+      "Trip and receipt cross-check",
       "Account and AI Voice quota",
       "Update",
       "Generate",
@@ -37,6 +39,8 @@
       "Check my ReceiptDrop account and remaining receipt quota.",
       "Find my ReceiptDrop receipts from this month.",
       "Find my meal and transport receipts from a business trip this month.",
+      "Show where I ate in July using my Footprints.",
+      "Cross-check my business-trip receipts against my Footprints.",
       "List my recent receipts so I can choose which ones to reimburse."
     ],
     "brandColor": "#FFE500",
