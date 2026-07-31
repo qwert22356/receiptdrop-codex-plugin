@@ -1,6 +1,6 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260730150807",
+  "version": "0.1.1+codex.20260731101546",
   "description": "Upload, search, view, and update ReceiptDrop receipts, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
@@ -23,6 +23,7 @@
       "Upload",
       "View",
       "Recent uploads",
+      "Business trip receipts",
       "Account and AI Voice quota",
       "Update",
       "Generate",
@@ -35,6 +36,7 @@
       "Show my ReceiptDrop receipts uploaded today.",
       "Check my ReceiptDrop account and remaining receipt quota.",
       "Find my ReceiptDrop receipts from this month.",
+      "Find my meal and transport receipts from a business trip this month.",
       "List my recent receipts so I can choose which ones to reimburse."
     ],
     "brandColor": "#FFE500",

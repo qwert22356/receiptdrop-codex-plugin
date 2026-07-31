@@ -4605,8 +4605,8 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize) {
-      if (normalize !== false)
+    function getFullPath(resolver, id = "", normalize2) {
+      if (normalize2 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -6002,7 +6002,7 @@ var require_fast_uri = __commonJS({
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, escapePreservingEscapes, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
-    function normalize(uri, options) {
+    function normalize2(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
         normalizeString(uri, options);
@@ -6275,7 +6275,7 @@ var require_fast_uri = __commonJS({
     }
     var fastUri = {
       SCHEMES,
-      normalize,
+      normalize: normalize2,
       resolve,
       resolveComponent,
       equal,
@@ -24163,6 +24163,155 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// src/travel.ts
+var TRANSPORT_TERMS = [
+  "transport",
+  "travel",
+  "trip",
+  "flight",
+  "airline",
+  "airport",
+  "train",
+  "rail",
+  "taxi",
+  "uber",
+  "cabify",
+  "metro",
+  "subway",
+  "bus",
+  "coach",
+  "parking",
+  "toll",
+  "fuel",
+  "gasoline",
+  "petrol",
+  "transporte",
+  "viaje",
+  "vuelo",
+  "avion",
+  "aeropuerto",
+  "tren",
+  "ferrocarril",
+  "autobus",
+  "aparcamiento",
+  "peaje",
+  "gasolina",
+  "renfe",
+  "sncf",
+  "ryanair",
+  "easyjet",
+  "iberia"
+];
+var MEAL_TERMS = [
+  "meal",
+  "food",
+  "dining",
+  "restaurant",
+  "cafe",
+  "coffee",
+  "breakfast",
+  "lunch",
+  "dinner",
+  "bakery",
+  "comida",
+  "restaurante",
+  "cafeteria",
+  "desayuno",
+  "almuerzo",
+  "cena",
+  "panaderia",
+  "repas",
+  "boulangerie",
+  "dejeuner",
+  "diner"
+];
+function normalize(value) {
+  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+}
+function searchableText(receipt) {
+  return normalize([
+    receipt.category,
+    receipt.seller,
+    receipt.address,
+    receipt.original_info,
+    receipt.ocr
+  ].filter(Boolean).join(" "));
+}
+function classifyTravelReceipt(receipt) {
+  const category = normalize(receipt.category);
+  if (MEAL_TERMS.some((term) => category.includes(term))) return "meal";
+  if (TRANSPORT_TERMS.some((term) => category.includes(term))) return "transport";
+  const text = searchableText(receipt);
+  if (TRANSPORT_TERMS.some((term) => text.includes(term))) return "transport";
+  if (MEAL_TERMS.some((term) => text.includes(term))) return "meal";
+  return "other";
+}
+function dateOf(receipt) {
+  const value = receipt.invoice_date;
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
+}
+function excerpt(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 360) : null;
+}
+function summarize(receipt, kind) {
+  return {
+    receipt_id: receipt.ind,
+    kind,
+    date: dateOf(receipt),
+    merchant: receipt.seller ?? null,
+    category: receipt.category ?? null,
+    amount: receipt.invoice_total ?? null,
+    currency: receipt.currency ?? null,
+    address: receipt.address ?? null,
+    route_or_location_evidence: excerpt(receipt.original_info) ?? excerpt(receipt.ocr),
+    has_attachment: Boolean(receipt.file_url)
+  };
+}
+function analyzeBusinessTripReceipts(receipts, year, month, homeLocation) {
+  const classified = receipts.map((receipt) => ({
+    receipt,
+    kind: classifyTravelReceipt(receipt)
+  }));
+  const transports = classified.filter((item) => item.kind === "transport" && dateOf(item.receipt)).sort((a, b) => dateOf(a.receipt).localeCompare(dateOf(b.receipt)));
+  const firstDate = transports.length >= 2 ? dateOf(transports[0].receipt) : null;
+  const lastDate = transports.length >= 2 ? dateOf(transports[transports.length - 1].receipt) : null;
+  const hasWindow = Boolean(firstDate && lastDate && firstDate !== lastDate);
+  const candidates = classified.filter(({ receipt, kind }) => {
+    if (kind === "other") return false;
+    const date3 = dateOf(receipt);
+    if (!date3) return false;
+    return hasWindow ? date3 >= firstDate && date3 <= lastDate : true;
+  });
+  const totalsByCurrency = {};
+  for (const { receipt } of candidates) {
+    const amount = Number(receipt.invoice_total);
+    if (!Number.isFinite(amount)) continue;
+    const currency = receipt.currency?.toLocaleUpperCase() || "UNKNOWN";
+    totalsByCurrency[currency] = (totalsByCurrency[currency] ?? 0) + amount;
+  }
+  const locations = [...new Set(candidates.map(({ receipt }) => receipt.address?.trim()).filter((value) => Boolean(value)))].slice(0, 30);
+  return {
+    requested_period: { year, month },
+    home_location: homeLocation ?? null,
+    inference: {
+      status: hasWindow ? "candidate_window_found" : "needs_user_review",
+      start_date: firstDate,
+      end_date: lastDate,
+      basis: hasWindow ? "The first and last transport receipts are provisional trip boundaries. Review route and location evidence with the user." : "Fewer than two transport dates were found, so no trip boundary was inferred.",
+      warning: "This is a candidate window. Daily commuting or personal expenses may be present."
+    },
+    transport_anchors: transports.map(({ receipt, kind }) => summarize(receipt, kind)),
+    location_evidence: locations,
+    meal_candidates: candidates.filter((item) => item.kind === "meal").map(({ receipt, kind }) => summarize(receipt, kind)),
+    transport_candidates: candidates.filter((item) => item.kind === "transport").map(({ receipt, kind }) => summarize(receipt, kind)),
+    suggested_receipt_ids: candidates.map(({ receipt }) => receipt.ind),
+    totals_by_currency: totalsByCurrency,
+    selection_required: true,
+    next_step: "Show the inferred route/window and every candidate. Ask the user to confirm exact receipt IDs, then call generate_expense_package."
+  };
+}
+
 // src/server.ts
 function asText(value) {
   return {
@@ -24174,7 +24323,7 @@ function createServer(client, config2, oauth) {
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. If a user's request cannot be completed with the available tools or fields, clearly state which requested capability is unsupported, summarize the relevant capabilities that are available, and suggest updating the plugin or using another appropriate method. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
   server.registerTool(
     "connect_receiptdrop",
@@ -24337,6 +24486,33 @@ function createServer(client, config2, oauth) {
     async ({ receipt_id }) => asText(
       await client.getReceiptAttachment(receipt_id)
     )
+  );
+  server.registerTool(
+    "find_business_trip_receipts",
+    {
+      title: "Find business-trip meal and transport receipts",
+      description: "Find candidate meal and transport receipts for a month. Uses transport dates as provisional trip boundaries and returns address/OCR route evidence. Month is required; year defaults to the current year. Always obtain confirmation before generating an expense package.",
+      inputSchema: {
+        year: external_exports.number().int().min(2e3).max(2100).optional(),
+        month: external_exports.number().int().min(1).max(12),
+        home_location: external_exports.string().min(1).optional().describe(
+          "Optional home/base city, such as Madrid, for interpreting location changes"
+        )
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async ({ year, month, home_location }) => {
+      const resolvedYear = year ?? (/* @__PURE__ */ new Date()).getFullYear();
+      const receipts = await client.searchReceipts({ year: resolvedYear, month, limit: 500 });
+      return asText(
+        analyzeBusinessTripReceipts(receipts, resolvedYear, month, home_location)
+      );
+    }
   );
   server.registerTool(
     "get_recent_uploads",

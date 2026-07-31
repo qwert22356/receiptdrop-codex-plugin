@@ -23,6 +23,7 @@ environment overrides for advanced or legacy setups.
 ## Included tools
 
 - `search_receipts`
+- `find_business_trip_receipts`
 - `get_receipt_attachment`
 - `get_recent_uploads`
 - `get_account_quota`
@@ -50,6 +51,12 @@ per-file limit.
 `get_recent_uploads` uses the v2.3.8 create-time endpoint, so it filters by the
 date a receipt was uploaded to ReceiptDrop rather than the date recognized from
 the invoice.
+
+`find_business_trip_receipts` analyzes one explicit year/month. It uses
+transport receipts as provisional trip boundaries, returns location and route
+evidence from receipt metadata/OCR, and includes meal and transport candidates
+inside the inferred window. Codex must show the candidates and obtain
+confirmation of exact receipt IDs before calling `generate_expense_package`.
 
 `get_account_quota` follows the v1.8.4 account screen and returns the configured
 user's subscription status, virtual receipt inbox, bonus quota, monthly quota,
