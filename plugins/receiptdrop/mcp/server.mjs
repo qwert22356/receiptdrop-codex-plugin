@@ -15631,7 +15631,7 @@ var ReceiptDropClient = class {
     );
     url.searchParams.set(
       "select",
-      "id,user_id,occurred_at,category,category_key,category_icon,note,place_name,latitude,longitude,is_completed,updated_at,deleted_at"
+      "id,user_id,occurred_at,category,category_key,category_icon,note,place_name,latitude,longitude,is_completed,updated_at,deleted_at,source"
     );
     url.searchParams.set("user_id", `eq.${userId}`);
     url.searchParams.set("deleted_at", "is.null");
