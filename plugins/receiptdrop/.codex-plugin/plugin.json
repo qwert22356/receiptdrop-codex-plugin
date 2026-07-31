@@ -1,6 +1,6 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260731152501",
+  "version": "0.1.1+codex.20260731153053",
   "description": "Manage ReceiptDrop receipts and Footprints, cross-check trips, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
@@ -26,6 +26,7 @@
       "Business trip receipts",
       "Footprint activity history",
       "Create and manage Footprints",
+      "Synced custom Footprint categories",
       "Trip and receipt cross-check",
       "Account and AI Voice quota",
       "Update",

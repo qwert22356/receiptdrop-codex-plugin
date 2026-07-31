@@ -15394,41 +15394,6 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-
-// src/footprints.ts
-var FOOTPRINT_CATEGORY_KEYS = [
-  "transport",
-  "meals",
-  "city_tax",
-  "other",
-  "accommodation",
-  "shopping",
-  "office",
-  "vehicle",
-  "healthcare",
-  "entertainment"
-];
-var ICONS = {
-  transport: "car.fill",
-  meals: "fork.knife",
-  city_tax: "building.2.fill",
-  other: "mic.fill",
-  accommodation: "bed.double.fill",
-  shopping: "cart.fill",
-  office: "briefcase.fill",
-  vehicle: "fuelpump.fill",
-  healthcare: "cross.case.fill",
-  entertainment: "ticket.fill"
-};
-function canonicalFootprintCategory(category) {
-  return {
-    category: null,
-    category_key: `todo.category.${category}`,
-    category_icon: ICONS[category]
-  };
-}
-
-// src/client.ts
 var delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 function numberValue(value) {
   const result = Number(value ?? 0);
@@ -15713,14 +15678,66 @@ var ReceiptDropClient = class {
       return true;
     });
   }
+  async listFootprintCategories() {
+    const userId = this.requireUserId();
+    await this.beforeRequest?.();
+    if (!this.config.apiToken) {
+      throw new Error(
+        "Footprint categories require a connected ReceiptDrop OAuth account."
+      );
+    }
+    const url = new URL(
+      `${this.config.supabaseRestBase ?? "https://xhavjxkrhsvezosozwma.supabase.co/rest/v1"}/expense_footprint_categories`
+    );
+    url.searchParams.set(
+      "select",
+      "user_id,category_id,category_key,name,icon,is_quick,sort_order,updated_at,deleted_at"
+    );
+    url.searchParams.set("user_id", `eq.${userId}`);
+    url.searchParams.set("deleted_at", "is.null");
+    url.searchParams.set("order", "sort_order.asc");
+    const response = await this.fetchImpl(url, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.config.apiToken}`,
+        ...this.config.voiceApiKey ? { apikey: this.config.voiceApiKey } : {}
+      }
+    });
+    const rows = await this.parseResponse(response);
+    if (!Array.isArray(rows)) {
+      throw new Error("ReceiptDrop category query returned an invalid response.");
+    }
+    return rows.filter((row) => row.user_id === userId && !row.deleted_at);
+  }
+  async resolveFootprintCategory(categoryId) {
+    const categories = await this.listFootprintCategories();
+    const category = categories.find((item) => item.category_id === categoryId);
+    if (!category) {
+      throw new Error(
+        "This Footprint category is unavailable or was deleted. Query the category list again."
+      );
+    }
+    return category;
+  }
+  categoryFields(category) {
+    return category.category_key ? {
+      category: null,
+      category_key: category.category_key,
+      category_icon: category.icon
+    } : {
+      category: category.name ?? null,
+      category_key: null,
+      category_icon: category.icon
+    };
+  }
   async createFootprint(input) {
     const userId = this.requireUserId();
-    const canonicalCategory = canonicalFootprintCategory(input.categoryKey);
+    const category = await this.resolveFootprintCategory(input.categoryId);
     const payload = {
       id: randomUUID(),
       user_id: userId,
       occurred_at: input.occurredAt,
-      ...canonicalCategory,
+      ...this.categoryFields(category),
       note: input.note ?? null,
       place_name: input.placeName ?? null,
       latitude: input.latitude ?? null,
@@ -15751,8 +15768,9 @@ var ReceiptDropClient = class {
     for (const [inputKey, databaseKey] of fields) {
       if (updates[inputKey] !== void 0) payload[databaseKey] = updates[inputKey];
     }
-    if (updates.categoryKey !== void 0) {
-      Object.assign(payload, canonicalFootprintCategory(updates.categoryKey));
+    if (updates.categoryId !== void 0) {
+      const category = await this.resolveFootprintCategory(updates.categoryId);
+      Object.assign(payload, this.categoryFields(category));
     }
     if (Object.keys(payload).length === 1) {
       throw new Error("At least one Footprint field must be supplied for update.");
@@ -24660,7 +24678,7 @@ function createServer(client, config2, oauth) {
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. Questions about where the user ate, travelled, or spent their day should use list_footprints; questions about invoices, amounts, reimbursement, or saved proof of purchase should use search_receipts. Use both only for explicit completeness or cross-check requests, and clearly separate Footprint activity evidence from receipt evidence. Before creating a Footprint, show the exact proposed time, category, note, and place and obtain explicit user confirmation. Before updating or deleting, call list_footprints, identify one exact footprint_id, show the proposed change, and obtain explicit confirmation. Pass the listed updated_at value unchanged so concurrent edits are never overwritten. Never infer confirmation. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Enable its Footprint check only when the user asks to cross-check, find missing receipts, or use Footprints. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. Footprints are secondary evidence and must never automatically add, remove, or reclassify receipts. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. Questions about where the user ate, travelled, or spent their day should use list_footprints; questions about invoices, amounts, reimbursement, or saved proof of purchase should use search_receipts. Use both only for explicit completeness or cross-check requests, and clearly separate Footprint activity evidence from receipt evidence. Before creating a Footprint, call list_footprint_categories and use one exact active category_id, including user-created categories. Show the exact proposed time, category, note, and place and obtain explicit user confirmation. Before updating or deleting, call list_footprints, identify one exact footprint_id, show the proposed change, and obtain explicit confirmation. For a category update, also call list_footprint_categories. Pass the listed updated_at value unchanged so concurrent edits are never overwritten. Never infer confirmation. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Enable its Footprint check only when the user asks to cross-check, find missing receipts, or use Footprints. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. Footprints are secondary evidence and must never automatically add, remove, or reclassify receipts. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
   server.registerTool(
     "connect_receiptdrop",
@@ -24881,14 +24899,36 @@ function createServer(client, config2, oauth) {
     }
   );
   server.registerTool(
+    "list_footprint_categories",
+    {
+      title: "List ReceiptDrop Footprint categories",
+      description: "Return the authenticated user's current ALL CATEGORIES library mirrored from the iOS App, including custom categories and the four quick-slide selections. Call this before creating a Footprint or changing its category.",
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async () => {
+      const categories = await client.listFootprintCategories();
+      return asText({
+        count: categories.length,
+        quick_categories: categories.filter((item) => item.is_quick),
+        all_categories: categories
+      });
+    }
+  );
+  server.registerTool(
     "create_footprint",
     {
       title: "Create a ReceiptDrop Footprint",
       description: "Create one Footprint after the user has explicitly confirmed the exact proposed time, category, note, and place. This creates activity data, not a receipt or attachment, and marks its source as chatgpt.",
       inputSchema: {
         occurred_at: external_exports.string().datetime({ offset: true }),
-        category_key: external_exports.enum(FOOTPRINT_CATEGORY_KEYS).describe(
-          "One ReceiptDrop App category: transport, meals, city_tax, other, accommodation, shopping, office, vehicle, healthcare, or entertainment"
+        category_id: external_exports.string().min(1).describe(
+          "Exact active category_id returned by list_footprint_categories"
         ),
         note: external_exports.string().min(1).nullable().optional(),
         place_name: external_exports.string().min(1).nullable().optional(),
@@ -24908,7 +24948,7 @@ function createServer(client, config2, oauth) {
     async (input) => {
       const item = await client.createFootprint({
         occurredAt: input.occurred_at,
-        categoryKey: input.category_key,
+        categoryId: input.category_id,
         note: input.note,
         placeName: input.place_name,
         latitude: input.latitude,
@@ -24936,7 +24976,9 @@ function createServer(client, config2, oauth) {
         footprint_id: external_exports.string().uuid(),
         expected_updated_at: external_exports.string().datetime({ offset: true }),
         occurred_at: external_exports.string().datetime({ offset: true }).optional(),
-        category_key: external_exports.enum(FOOTPRINT_CATEGORY_KEYS).optional(),
+        category_id: external_exports.string().min(1).optional().describe(
+          "Exact active category_id returned by list_footprint_categories"
+        ),
         note: external_exports.string().min(1).nullable().optional(),
         place_name: external_exports.string().min(1).nullable().optional(),
         latitude: external_exports.number().min(-90).max(90).nullable().optional(),
@@ -24957,7 +24999,7 @@ function createServer(client, config2, oauth) {
         input.expected_updated_at,
         {
           occurredAt: input.occurred_at,
-          categoryKey: input.category_key,
+          categoryId: input.category_id,
           note: input.note,
           placeName: input.place_name,
           latitude: input.latitude,

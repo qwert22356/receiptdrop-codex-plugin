@@ -44,6 +44,7 @@ Find my receipts from July 1, 2026.
 - `get_account_quota`
 - `get_receipt_attachment`
 - `list_footprints`
+- `list_footprint_categories`
 - `create_footprint`
 - `update_footprint`
 - `delete_footprint`
