@@ -15854,6 +15854,26 @@ var ReceiptDropClient = class {
     }
   }
   async searchReceipts(options = {}) {
+    if (!options.startDate && !options.endDate && !options.year && !options.month) {
+      const year = (/* @__PURE__ */ new Date()).getFullYear();
+      const monthlyResults = await Promise.all(
+        Array.from(
+          { length: 12 },
+          (_, index) => this.searchReceipts({
+            ...options,
+            year,
+            month: index + 1,
+            limit: 500,
+            offset: 0
+          })
+        )
+      );
+      const unique = /* @__PURE__ */ new Map();
+      for (const receipt of monthlyResults.flat()) unique.set(receipt.ind, receipt);
+      return [...unique.values()].sort(
+        (left, right) => String(right.invoice_date ?? "").localeCompare(String(left.invoice_date ?? ""))
+      ).slice(options.offset ?? 0, (options.offset ?? 0) + Math.min(options.limit ?? 100, 500));
+    }
     const userId = this.requireUserId();
     const payload = {
       user_id: userId,
@@ -15865,10 +15885,6 @@ var ReceiptDropClient = class {
     if (options.month) payload.month = options.month;
     if (options.startDate) payload.start_time = options.startDate;
     if (options.endDate) payload.end_time = options.endDate;
-    if (!options.startDate && !options.endDate && !options.year && !options.month) {
-      payload.start_time = "string";
-      payload.end_time = "string";
-    }
     const result = await this.requestJson(
       "/receipt-items-en/get-receipt-items",
       payload
@@ -15876,27 +15892,39 @@ var ReceiptDropClient = class {
     if (!Array.isArray(result)) {
       throw new Error("ReceiptDrop receipt query did not return an array.");
     }
-    const query = options.query?.toLocaleLowerCase();
+    const queryTokens = options.query?.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 1);
     return result.filter((receipt) => {
       if (receipt.user_id !== userId) return false;
       const amount = numberValue(receipt.invoice_total);
       if (options.minAmount !== void 0 && amount < options.minAmount) return false;
       if (options.maxAmount !== void 0 && amount > options.maxAmount) return false;
-      if (options.category && receipt.category?.toLocaleLowerCase() !== options.category.toLocaleLowerCase()) {
-        return false;
+      const searchableText2 = [
+        receipt.buyer,
+        receipt.seller,
+        receipt.category,
+        receipt.invoice_number,
+        receipt.address,
+        receipt.original_info,
+        receipt.ocr
+      ].filter(Boolean).join(" ").toLocaleLowerCase();
+      if (options.category) {
+        const requestedCategory = options.category.toLocaleLowerCase();
+        const storedCategory = receipt.category?.toLocaleLowerCase() ?? "";
+        const transportRequest = /transport|metro|subway|taxi|bus|train|rail|transit/.test(
+          requestedCategory
+        );
+        const transportReceipt = /transport|metro|subway|taxi|bus|train|rail|transit/.test(
+          `${storedCategory} ${searchableText2}`
+        );
+        if (!storedCategory.includes(requestedCategory) && !(storedCategory.length > 0 && requestedCategory.includes(storedCategory)) && !(transportRequest && transportReceipt)) {
+          return false;
+        }
       }
       if (options.currency && receipt.currency?.toLocaleUpperCase() !== options.currency.toLocaleUpperCase()) {
         return false;
       }
-      if (query) {
-        const haystack = [
-          receipt.buyer,
-          receipt.seller,
-          receipt.category,
-          receipt.invoice_number,
-          receipt.address
-        ].filter(Boolean).join(" ").toLocaleLowerCase();
-        if (!haystack.includes(query)) return false;
+      if (queryTokens?.length && !queryTokens.some((token) => searchableText2.includes(token))) {
+        return false;
       }
       return true;
     });
@@ -24687,7 +24715,7 @@ function createServer(client, config2, oauth) {
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. Questions about where the user ate, travelled, or spent their day should use list_footprints; questions about invoices, amounts, reimbursement, or saved proof of purchase should use search_receipts. Use both only for explicit completeness or cross-check requests, and clearly separate Footprint activity evidence from receipt evidence. Before creating a Footprint, call list_footprint_categories and use one exact active category_id, including user-created categories. Show the exact proposed time, category, note, and place and obtain explicit user confirmation. Before updating or deleting, call list_footprints, identify one exact footprint_id, show the proposed change, and obtain explicit confirmation. For a category update, also call list_footprint_categories. Pass the listed updated_at value unchanged so concurrent edits are never overwritten. Never infer confirmation. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Enable its Footprint check only when the user asks to cross-check, find missing receipts, or use Footprints. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. Footprints are secondary evidence and must never automatically add, remove, or reclassify receipts. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. Questions about where the user ate, travelled, or spent their day should use list_footprints; questions about invoices, amounts, reimbursement, or saved proof of purchase should use search_receipts. Use both only for explicit completeness or cross-check requests, and clearly separate Footprint activity evidence from receipt evidence. For approximate receipt requests, search by the supplied amount range and currency first; treat location, merchant wording, and category as corroborating clues rather than reasons to prematurely conclude no match. If the user omits a date, search_receipts checks every month of the current calendar year. Never describe a limited or date-scoped result set as all receipts in the account, and never claim a receipt is absent from the account unless every relevant date scope has actually been searched. Before creating a Footprint, call list_footprint_categories and use one exact active category_id, including user-created categories. Show the exact proposed time, category, note, and place and obtain explicit user confirmation. Before updating or deleting, call list_footprints, identify one exact footprint_id, show the proposed change, and obtain explicit confirmation. For a category update, also call list_footprint_categories. Pass the listed updated_at value unchanged so concurrent edits are never overwritten. Never infer confirmation. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Enable its Footprint check only when the user asks to cross-check, find missing receipts, or use Footprints. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. Footprints are secondary evidence and must never automatically add, remove, or reclassify receipts. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
   server.registerTool(
     "connect_receiptdrop",
@@ -24776,7 +24804,7 @@ function createServer(client, config2, oauth) {
     "search_receipts",
     {
       title: "Search ReceiptDrop receipts",
-      description: "Use this when the user wants to find ReceiptDrop receipts. Returns stable receipt_id values plus attachment URLs that can be opened or displayed.",
+      description: "Find ReceiptDrop receipts by date or fuzzy merchant, location, category, currency, and amount clues. With no date, searches all 12 months of the current year rather than an incomplete undated result set. Returns stable receipt_id values plus attachment URLs that can be opened or displayed.",
       inputSchema: {
         start_date: external_exports.string().optional().describe("Inclusive YYYY-MM-DD date"),
         end_date: external_exports.string().optional().describe("Inclusive YYYY-MM-DD date"),
