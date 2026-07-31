@@ -15394,6 +15394,41 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+
+// src/footprints.ts
+var FOOTPRINT_CATEGORY_KEYS = [
+  "transport",
+  "meals",
+  "city_tax",
+  "other",
+  "accommodation",
+  "shopping",
+  "office",
+  "vehicle",
+  "healthcare",
+  "entertainment"
+];
+var ICONS = {
+  transport: "car.fill",
+  meals: "fork.knife",
+  city_tax: "building.2.fill",
+  other: "mic.fill",
+  accommodation: "bed.double.fill",
+  shopping: "cart.fill",
+  office: "briefcase.fill",
+  vehicle: "fuelpump.fill",
+  healthcare: "cross.case.fill",
+  entertainment: "ticket.fill"
+};
+function canonicalFootprintCategory(category) {
+  return {
+    category: null,
+    category_key: `todo.category.${category}`,
+    category_icon: ICONS[category]
+  };
+}
+
+// src/client.ts
 var delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 function numberValue(value) {
   const result = Number(value ?? 0);
@@ -15680,18 +15715,19 @@ var ReceiptDropClient = class {
   }
   async createFootprint(input) {
     const userId = this.requireUserId();
+    const canonicalCategory = canonicalFootprintCategory(input.categoryKey);
     const payload = {
       id: randomUUID(),
       user_id: userId,
       occurred_at: input.occurredAt,
-      category: input.category ?? null,
-      category_key: input.categoryKey ?? null,
-      category_icon: input.categoryIcon ?? null,
+      ...canonicalCategory,
       note: input.note ?? null,
       place_name: input.placeName ?? null,
       latitude: input.latitude ?? null,
       longitude: input.longitude ?? null,
-      is_completed: input.isCompleted ?? false,
+      // A newly recorded activity is always an uncompleted expense task.
+      // Completion can only be changed later through update_footprint.
+      is_completed: false,
       updated_at: (/* @__PURE__ */ new Date()).toISOString(),
       deleted_at: null,
       source: "chatgpt"
@@ -15706,9 +15742,6 @@ var ReceiptDropClient = class {
     const payload = { updated_at: (/* @__PURE__ */ new Date()).toISOString() };
     const fields = [
       ["occurredAt", "occurred_at"],
-      ["category", "category"],
-      ["categoryKey", "category_key"],
-      ["categoryIcon", "category_icon"],
       ["note", "note"],
       ["placeName", "place_name"],
       ["latitude", "latitude"],
@@ -15717,6 +15750,9 @@ var ReceiptDropClient = class {
     ];
     for (const [inputKey, databaseKey] of fields) {
       if (updates[inputKey] !== void 0) payload[databaseKey] = updates[inputKey];
+    }
+    if (updates.categoryKey !== void 0) {
+      Object.assign(payload, canonicalFootprintCategory(updates.categoryKey));
     }
     if (Object.keys(payload).length === 1) {
       throw new Error("At least one Footprint field must be supplied for update.");
@@ -24851,14 +24887,13 @@ function createServer(client, config2, oauth) {
       description: "Create one Footprint after the user has explicitly confirmed the exact proposed time, category, note, and place. This creates activity data, not a receipt or attachment, and marks its source as chatgpt.",
       inputSchema: {
         occurred_at: external_exports.string().datetime({ offset: true }),
-        category: external_exports.string().min(1).nullable().optional(),
-        category_key: external_exports.string().min(1).nullable().optional(),
-        category_icon: external_exports.string().min(1).nullable().optional(),
+        category_key: external_exports.enum(FOOTPRINT_CATEGORY_KEYS).describe(
+          "One ReceiptDrop App category: transport, meals, city_tax, other, accommodation, shopping, office, vehicle, healthcare, or entertainment"
+        ),
         note: external_exports.string().min(1).nullable().optional(),
         place_name: external_exports.string().min(1).nullable().optional(),
         latitude: external_exports.number().min(-90).max(90).nullable().optional(),
         longitude: external_exports.number().min(-180).max(180).nullable().optional(),
-        is_completed: external_exports.boolean().default(false),
         confirmed: external_exports.literal(true).describe(
           "True only after the user explicitly confirms the displayed Footprint details"
         )
@@ -24871,19 +24906,13 @@ function createServer(client, config2, oauth) {
       }
     },
     async (input) => {
-      if (!input.category && !input.category_key && !input.note) {
-        throw new Error("A Footprint needs a category, category_key, or note.");
-      }
       const item = await client.createFootprint({
         occurredAt: input.occurred_at,
-        category: input.category,
         categoryKey: input.category_key,
-        categoryIcon: input.category_icon,
         note: input.note,
         placeName: input.place_name,
         latitude: input.latitude,
-        longitude: input.longitude,
-        isCompleted: input.is_completed
+        longitude: input.longitude
       });
       return asText({
         created: true,
@@ -24907,9 +24936,7 @@ function createServer(client, config2, oauth) {
         footprint_id: external_exports.string().uuid(),
         expected_updated_at: external_exports.string().datetime({ offset: true }),
         occurred_at: external_exports.string().datetime({ offset: true }).optional(),
-        category: external_exports.string().min(1).nullable().optional(),
-        category_key: external_exports.string().min(1).nullable().optional(),
-        category_icon: external_exports.string().min(1).nullable().optional(),
+        category_key: external_exports.enum(FOOTPRINT_CATEGORY_KEYS).optional(),
         note: external_exports.string().min(1).nullable().optional(),
         place_name: external_exports.string().min(1).nullable().optional(),
         latitude: external_exports.number().min(-90).max(90).nullable().optional(),
@@ -24930,9 +24957,7 @@ function createServer(client, config2, oauth) {
         input.expected_updated_at,
         {
           occurredAt: input.occurred_at,
-          category: input.category,
           categoryKey: input.category_key,
-          categoryIcon: input.category_icon,
           note: input.note,
           placeName: input.place_name,
           latitude: input.latitude,
