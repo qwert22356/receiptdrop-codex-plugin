@@ -15389,6 +15389,7 @@ var StdioServerTransport = class {
 // src/client.ts
 var import_extract_zip = __toESM(require_extract_zip(), 1);
 import { createWriteStream } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -15676,6 +15677,104 @@ var ReceiptDropClient = class {
       if (query && !text.includes(query)) return false;
       return true;
     });
+  }
+  async createFootprint(input) {
+    const userId = this.requireUserId();
+    const payload = {
+      id: randomUUID(),
+      user_id: userId,
+      occurred_at: input.occurredAt,
+      category: input.category ?? null,
+      category_key: input.categoryKey ?? null,
+      category_icon: input.categoryIcon ?? null,
+      note: input.note ?? null,
+      place_name: input.placeName ?? null,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      is_completed: input.isCompleted ?? false,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString(),
+      deleted_at: null,
+      source: "chatgpt"
+    };
+    const rows = await this.mutateFootprints("POST", new URLSearchParams(), payload);
+    if (rows.length !== 1 || rows[0].user_id !== userId) {
+      throw new Error("ReceiptDrop did not return the created Footprint.");
+    }
+    return rows[0];
+  }
+  async updateFootprint(footprintId, expectedUpdatedAt, updates) {
+    const payload = { updated_at: (/* @__PURE__ */ new Date()).toISOString() };
+    const fields = [
+      ["occurredAt", "occurred_at"],
+      ["category", "category"],
+      ["categoryKey", "category_key"],
+      ["categoryIcon", "category_icon"],
+      ["note", "note"],
+      ["placeName", "place_name"],
+      ["latitude", "latitude"],
+      ["longitude", "longitude"],
+      ["isCompleted", "is_completed"]
+    ];
+    for (const [inputKey, databaseKey] of fields) {
+      if (updates[inputKey] !== void 0) payload[databaseKey] = updates[inputKey];
+    }
+    if (Object.keys(payload).length === 1) {
+      throw new Error("At least one Footprint field must be supplied for update.");
+    }
+    return this.mutateOneFootprint(footprintId, expectedUpdatedAt, payload, "update");
+  }
+  async deleteFootprint(footprintId, expectedUpdatedAt) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    return this.mutateOneFootprint(
+      footprintId,
+      expectedUpdatedAt,
+      { deleted_at: now, updated_at: now },
+      "delete"
+    );
+  }
+  async mutateOneFootprint(footprintId, expectedUpdatedAt, payload, action) {
+    const userId = this.requireUserId();
+    const query = new URLSearchParams();
+    query.set("id", `eq.${footprintId}`);
+    query.set("user_id", `eq.${userId}`);
+    query.set("deleted_at", "is.null");
+    query.set("updated_at", `eq.${expectedUpdatedAt}`);
+    const rows = await this.mutateFootprints("PATCH", query, payload);
+    if (rows.length === 0) {
+      throw new Error(
+        `Footprint was not ${action}d because it changed, was deleted, or does not belong to this account. Query it again before retrying.`
+      );
+    }
+    if (rows.length !== 1 || rows[0].user_id !== userId) {
+      throw new Error(`ReceiptDrop returned an invalid Footprint ${action} response.`);
+    }
+    return rows[0];
+  }
+  async mutateFootprints(method, query, payload) {
+    await this.beforeRequest?.();
+    if (!this.config.apiToken) {
+      throw new Error("Footprint changes require a connected ReceiptDrop OAuth account.");
+    }
+    const url = new URL(
+      `${this.config.supabaseRestBase ?? "https://xhavjxkrhsvezosozwma.supabase.co/rest/v1"}/expense_footprints`
+    );
+    url.search = query.toString();
+    const response = await this.fetchImpl(url, {
+      method,
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${this.config.apiToken}`,
+        ...this.config.voiceApiKey ? { apikey: this.config.voiceApiKey } : {},
+        prefer: "return=representation"
+      },
+      body: JSON.stringify(payload)
+    });
+    const rows = await this.parseResponse(response);
+    if (!Array.isArray(rows)) {
+      throw new Error("ReceiptDrop Footprint mutation returned an invalid response.");
+    }
+    return rows;
   }
   async parseResponse(response) {
     const text = await response.text();
@@ -24525,7 +24624,7 @@ function createServer(client, config2, oauth) {
     name: "receiptdrop",
     version: "0.1.0"
   }, {
-    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. Questions about where the user ate, travelled, or spent their day should use list_footprints; questions about invoices, amounts, reimbursement, or saved proof of purchase should use search_receipts. Use both only for explicit completeness or cross-check requests, and clearly separate Footprint activity evidence from receipt evidence. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Enable its Footprint check only when the user asks to cross-check, find missing receipts, or use Footprints. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. Footprints are secondary evidence and must never automatically add, remove, or reclassify receipts. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
+    instructions: "Use only the ReceiptDrop capabilities exposed by this MCP server. If ReceiptDrop is not connected, call connect_receiptdrop. That tool opens the browser or copies the authorization link itself: never print, reconstruct, expose, or ask for the OAuth authorization URL in conversation text. Never ask the user for a ReceiptDrop UUID unless they explicitly request the legacy configuration method. Questions about where the user ate, travelled, or spent their day should use list_footprints; questions about invoices, amounts, reimbursement, or saved proof of purchase should use search_receipts. Use both only for explicit completeness or cross-check requests, and clearly separate Footprint activity evidence from receipt evidence. Before creating a Footprint, show the exact proposed time, category, note, and place and obtain explicit user confirmation. Before updating or deleting, call list_footprints, identify one exact footprint_id, show the proposed change, and obtain explicit confirmation. Pass the listed updated_at value unchanged so concurrent edits are never overwritten. Never infer confirmation. For business-trip meal and transport requests, require a month and ask the user if it is missing. Use the current year when the year is omitted and state that assumption, then call find_business_trip_receipts. Enable its Footprint check only when the user asks to cross-check, find missing receipts, or use Footprints. Treat its trip window and receipt IDs as candidates: show route/location evidence and all candidates, then obtain confirmation of exact receipt IDs before calling generate_expense_package. Footprints are secondary evidence and must never automatically add, remove, or reclassify receipts. To display an attachment, always call get_receipt_attachment and render its local displayMarkdown; never embed the remote signed attachmentUrl as an image because it can fail or stall. Never claim that an unsupported action was completed or submit external changes without the user's authorization."
   });
   server.registerTool(
     "connect_receiptdrop",
@@ -24738,8 +24837,149 @@ function createServer(client, config2, oauth) {
           place: item.place_name ?? null,
           latitude: item.latitude ?? null,
           longitude: item.longitude ?? null,
-          is_completed: item.is_completed
+          is_completed: item.is_completed,
+          updated_at: item.updated_at,
+          source: item.source ?? null
         }))
+      });
+    }
+  );
+  server.registerTool(
+    "create_footprint",
+    {
+      title: "Create a ReceiptDrop Footprint",
+      description: "Create one Footprint after the user has explicitly confirmed the exact proposed time, category, note, and place. This creates activity data, not a receipt or attachment, and marks its source as chatgpt.",
+      inputSchema: {
+        occurred_at: external_exports.string().datetime({ offset: true }),
+        category: external_exports.string().min(1).nullable().optional(),
+        category_key: external_exports.string().min(1).nullable().optional(),
+        category_icon: external_exports.string().min(1).nullable().optional(),
+        note: external_exports.string().min(1).nullable().optional(),
+        place_name: external_exports.string().min(1).nullable().optional(),
+        latitude: external_exports.number().min(-90).max(90).nullable().optional(),
+        longitude: external_exports.number().min(-180).max(180).nullable().optional(),
+        is_completed: external_exports.boolean().default(false),
+        confirmed: external_exports.literal(true).describe(
+          "True only after the user explicitly confirms the displayed Footprint details"
+        )
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (input) => {
+      if (!input.category && !input.category_key && !input.note) {
+        throw new Error("A Footprint needs a category, category_key, or note.");
+      }
+      const item = await client.createFootprint({
+        occurredAt: input.occurred_at,
+        category: input.category,
+        categoryKey: input.category_key,
+        categoryIcon: input.category_icon,
+        note: input.note,
+        placeName: input.place_name,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        isCompleted: input.is_completed
+      });
+      return asText({
+        created: true,
+        source: item.source ?? "chatgpt",
+        footprint_id: item.id,
+        occurred_at: item.occurred_at,
+        category: item.category_key ?? item.category ?? null,
+        note: item.note ?? null,
+        place: item.place_name ?? null,
+        is_completed: item.is_completed,
+        updated_at: item.updated_at
+      });
+    }
+  );
+  server.registerTool(
+    "update_footprint",
+    {
+      title: "Update a ReceiptDrop Footprint",
+      description: "Update one exact non-deleted Footprint after explicit confirmation. First call list_footprints and pass its updated_at unchanged; the update is rejected if another device changed the record.",
+      inputSchema: {
+        footprint_id: external_exports.string().uuid(),
+        expected_updated_at: external_exports.string().datetime({ offset: true }),
+        occurred_at: external_exports.string().datetime({ offset: true }).optional(),
+        category: external_exports.string().min(1).nullable().optional(),
+        category_key: external_exports.string().min(1).nullable().optional(),
+        category_icon: external_exports.string().min(1).nullable().optional(),
+        note: external_exports.string().min(1).nullable().optional(),
+        place_name: external_exports.string().min(1).nullable().optional(),
+        latitude: external_exports.number().min(-90).max(90).nullable().optional(),
+        longitude: external_exports.number().min(-180).max(180).nullable().optional(),
+        is_completed: external_exports.boolean().optional(),
+        confirmed: external_exports.literal(true)
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (input) => {
+      const item = await client.updateFootprint(
+        input.footprint_id,
+        input.expected_updated_at,
+        {
+          occurredAt: input.occurred_at,
+          category: input.category,
+          categoryKey: input.category_key,
+          categoryIcon: input.category_icon,
+          note: input.note,
+          placeName: input.place_name,
+          latitude: input.latitude,
+          longitude: input.longitude,
+          isCompleted: input.is_completed
+        }
+      );
+      return asText({
+        updated: true,
+        footprint_id: item.id,
+        occurred_at: item.occurred_at,
+        category: item.category_key ?? item.category ?? null,
+        note: item.note ?? null,
+        place: item.place_name ?? null,
+        is_completed: item.is_completed,
+        updated_at: item.updated_at
+      });
+    }
+  );
+  server.registerTool(
+    "delete_footprint",
+    {
+      title: "Delete a ReceiptDrop Footprint",
+      description: "Soft-delete one exact Footprint after explicit confirmation. First call list_footprints and pass its updated_at unchanged; the delete is rejected if another device changed the record.",
+      inputSchema: {
+        footprint_id: external_exports.string().uuid(),
+        expected_updated_at: external_exports.string().datetime({ offset: true }),
+        confirmed: external_exports.literal(true)
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (input) => {
+      const item = await client.deleteFootprint(
+        input.footprint_id,
+        input.expected_updated_at
+      );
+      return asText({
+        deleted: true,
+        deletion_type: "soft_delete",
+        footprint_id: item.id,
+        deleted_at: item.deleted_at,
+        updated_at: item.updated_at
       });
     }
   );

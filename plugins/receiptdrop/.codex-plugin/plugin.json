@@ -1,7 +1,7 @@
 {
   "name": "receiptdrop",
-  "version": "0.1.1+codex.20260731145844",
-  "description": "Upload, search, view, and update ReceiptDrop receipts, query Footprints, cross-check trips, and generate reimbursement packages from Codex.",
+  "version": "0.1.1+codex.20260731151408",
+  "description": "Manage ReceiptDrop receipts and Footprints, cross-check trips, and generate reimbursement packages from Codex.",
   "author": {
     "name": "ReceiptDrop"
   },
@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "ReceiptDrop",
     "shortDescription": "Upload, find, view, and manage receipts.",
-    "longDescription": "Connect Codex to your ReceiptDrop account to query synced Footprint activities, upload and search receipts, cross-check business trips, view attachments, update details, confirm expenses, and generate reimbursement packages.",
+    "longDescription": "Connect Codex to your ReceiptDrop account to query, create, update, and soft-delete synced Footprints; upload and search receipts; cross-check business trips; and generate reimbursement packages.",
     "developerName": "ReceiptDrop",
     "category": "Productivity",
     "capabilities": [
@@ -25,6 +25,7 @@
       "Recent uploads",
       "Business trip receipts",
       "Footprint activity history",
+      "Create and manage Footprints",
       "Trip and receipt cross-check",
       "Account and AI Voice quota",
       "Update",
@@ -40,6 +41,7 @@
       "Find my ReceiptDrop receipts from this month.",
       "Find my meal and transport receipts from a business trip this month.",
       "Show where I ate in July using my Footprints.",
+      "Record a Footprint after showing me the details for confirmation.",
       "Cross-check my business-trip receipts against my Footprints.",
       "List my recent receipts so I can choose which ones to reimburse."
     ],
